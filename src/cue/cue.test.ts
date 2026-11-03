@@ -27,7 +27,19 @@ describe("organization and project", () => {
 			"widgets",
 		],
 		["ssh url origin", { originUrl: "ssh://git@github.com/initech/widgets" }, "initech", "widgets"],
-		["non-github origin", { originUrl: "https://example.com/x/y.git" }, "generic", "none"],
+		[
+			"non-github origin keeps the repo name",
+			{ originUrl: "https://example.com/x/y.git" },
+			"generic",
+			"y",
+		],
+		["windows separators", { spaceRoot: "C:\\w\\acme\\widgets" }, "acme-corp", "widgets"],
+		[
+			"root named like an Object member",
+			{ spaceRoot: "/w/constructor/widgets" },
+			"generic",
+			"widgets",
+		],
 		["neither", {}, "generic", "none"],
 	];
 	test.each(rows)("%s", (_name, overrides, organization, project) => {

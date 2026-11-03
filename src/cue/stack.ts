@@ -14,7 +14,7 @@ export const manifestExtensions = [".marko"] as const;
 const packageManagers = ["bun", "pnpm", "yarn", "npm"];
 
 function baseName(path: string): string {
-	return path.slice(path.lastIndexOf("/") + 1);
+	return path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1);
 }
 
 function packageJsonStack(content: string): { names: string[]; typescript: boolean } {

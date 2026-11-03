@@ -43,10 +43,12 @@ const taskBySkill: Record<string, Task> = {
 	spec: "plan",
 };
 
-/** `owner` and `repo` of a GitHub remote URL (https, ssh or scp-like). */
-function parseGithubOrigin(url: string): { owner: string; repo: string } | undefined {
-	const match = /github\.com[:/]+([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/.exec(url.trim());
-	return match?.[1] && match[2] ? { owner: match[1], repo: match[2] } : undefined;
+/** Repository name (any host) and, for GitHub remotes only, the owner. */
+function parseOrigin(url: string): { owner?: string; repo: string } | undefined {
+	const github = /github\.com[:/]+([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/.exec(url.trim());
+	if (github?.[1] && github[2]) return { owner: github[1], repo: github[2] };
+	const repo = /([^/:\s]+?)(?:\.git)?\/?$/.exec(url.trim())?.[1];
+	return repo ? { repo } : undefined;
 }
 
 function skillKey(skill: string | undefined): string | undefined {
@@ -56,18 +58,19 @@ function skillKey(skill: string | undefined): string | undefined {
 }
 
 function resolveWhere(input: CueInput): { organization: string; project: string } {
-	const origin = input.originUrl ? parseGithubOrigin(input.originUrl) : undefined;
+	const origin = input.originUrl ? parseOrigin(input.originUrl) : undefined;
 	if (input.spaceRoot) {
-		const segments = input.spaceRoot.split("/").filter(Boolean);
+		const segments = input.spaceRoot.split(/[\\/]/).filter(Boolean);
 		const space = segments.pop() || "none";
 		// The mapping key is the directory the space sits under, not the space itself.
 		const root = segments.pop() ?? "";
+		const mapped = Object.hasOwn(input.organizations, root) ? input.organizations[root] : undefined;
 		return {
-			organization: input.organizations[root] ?? origin?.owner ?? "generic",
+			organization: mapped ?? origin?.owner ?? "generic",
 			project: space,
 		};
 	}
-	if (origin) return { organization: origin.owner, project: origin.repo };
+	if (origin) return { organization: origin.owner ?? "generic", project: origin.repo };
 	return { organization: "generic", project: "none" };
 }
 
