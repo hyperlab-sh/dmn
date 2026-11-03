@@ -5,6 +5,8 @@ import type {
 	MemoryRecord,
 	MemoryScore,
 	MemoryStore,
+	MentalModel,
+	MentalModelInput,
 	RecallQuery,
 	RetainItem,
 	TagCount,
@@ -52,6 +54,30 @@ interface WireMemory {
 	mentioned_at?: string | null;
 	occurred_start?: string | null;
 	scores?: (MemoryScore & Record<string, number | null | undefined>) | null;
+}
+
+interface WireMentalModel {
+	id: string;
+	content?: string | null;
+	tags?: string[] | null;
+	refreshed_at?: string | null;
+	created_at?: string | null;
+}
+
+/** The role a model's `role:<r>` tag names; undefined when it has none, so it is not dmn's. */
+function modelRole(tags: readonly string[]): string | undefined {
+	return tags.find((tag) => tag.startsWith("role:"))?.slice("role:".length);
+}
+
+function toMentalModel(wire: WireMentalModel): MentalModel | null {
+	const role = modelRole(wire.tags ?? []);
+	if (role === undefined) return null;
+	return {
+		id: wire.id,
+		role,
+		content: wire.content ?? "",
+		refreshedAt: wire.refreshed_at ?? wire.created_at ?? "",
+	};
 }
 
 function toRecord(wire: WireMemory): MemoryRecord {
@@ -216,5 +242,38 @@ export class HindsightStore implements MemoryStore {
 			for (const item of page.items) tags.push({ tag: item.tag, count: item.count });
 			if (page.items.length === 0 || offset + page.items.length >= page.total) return tags;
 		}
+	}
+
+	async mentalModels(bank: string): Promise<MentalModel[]> {
+		try {
+			const response = await this.request<{ items: WireMentalModel[] }>(
+				"GET",
+				this.url(bank, "/mental-models"),
+			);
+			const models: MentalModel[] = [];
+			for (const wire of response.items) {
+				const model = toMentalModel(wire);
+				if (model) models.push(model);
+			}
+			return models;
+		} catch (error) {
+			if (isBankNotFound(error)) return [];
+			throw error;
+		}
+	}
+
+	async createMentalModel(bank: string, model: MentalModelInput): Promise<void> {
+		await this.request("POST", this.url(bank, "/mental-models"), {
+			id: model.id,
+			name: model.name,
+			source_query: model.sourceQuery,
+			tags: model.tags,
+			max_tokens: model.maxTokens,
+		});
+	}
+
+	async refreshMentalModel(bank: string, id: string): Promise<void> {
+		// Refresh takes no body: the store rebuilds the model from its own source query.
+		await this.request("POST", this.url(bank, `/mental-models/${encodeURIComponent(id)}/refresh`));
 	}
 }

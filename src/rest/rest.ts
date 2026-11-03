@@ -50,10 +50,7 @@ export interface RestOptions {
 	now: Date;
 	/** Receives non-fatal problems (a refused promotion, a failed bank); stderr in the CLI. */
 	onWarning?: (message: string) => void;
-	/**
-	 * Step 3 of rest: the roster sync (AC-18). No consumer in this unit — the brief's seam —
-	 * unit roster wires it from `cli/commands/rest.ts`.
-	 */
+	/** Step 3 of rest: the roster sync, one mental model per role (AC-18). */
 	syncRoster?: (bank: string) => Promise<void> | void;
 	/** Memories fetched per store call. */
 	pageSize?: number;
@@ -180,7 +177,7 @@ export async function runRest(
 					onWarning?.(`dmn: cannot promote ${proposal.id}: ${(error as Error).message}`);
 				}
 			}
-			// Step 3: the roster sync, a no-op until unit roster wires it from cli/commands/rest.ts.
+			// Step 3: the roster sync — the missing role models are created, every one refreshed.
 			// Inside the try: a roster that throws is this bank's failure, not the run's.
 			await syncRoster?.(bank);
 		} catch (error) {

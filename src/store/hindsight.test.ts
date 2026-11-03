@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { bankFor, HindsightStore, isBankNotFound, StoreError } from "./hindsight.js";
+import type { MentalModel } from "./types.js";
 
 let oddServer: ReturnType<typeof Bun.serve>;
 let baseUrl: string;
@@ -35,6 +36,147 @@ beforeAll(() => {
 });
 
 afterAll(() => oddServer.stop(true));
+
+/** One recorded request: where it went, how it was sent. */
+interface RecordedRequest {
+	url: string;
+	method?: string | undefined;
+	body?: unknown;
+	contentType?: string | undefined;
+}
+
+/**
+ * Runs `call` against a stubbed global fetch that records every request and answers from
+ * `respond`, restoring the real one after. Asserts the adapter's request shapes exactly.
+ */
+async function stubbedFetch(
+	respond: () => Response,
+	call: () => Promise<void>,
+): Promise<RecordedRequest[]> {
+	const original = globalThis.fetch;
+	const requests: RecordedRequest[] = [];
+	globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+		requests.push({
+			url: String(input),
+			method: init?.method,
+			body: init?.body === undefined ? undefined : JSON.parse(String(init?.body)),
+			contentType: (init?.headers as Record<string, string> | undefined)?.["content-type"],
+		});
+		return respond();
+	}) as typeof fetch;
+	try {
+		await call();
+	} finally {
+		globalThis.fetch = original;
+	}
+	return requests;
+}
+
+test("mentalModels maps the listed models and skips any without a role tag", async () => {
+	const store = new HindsightStore({ baseUrl: "http://stub" });
+	let models: MentalModel[] = [];
+	const requests = await stubbedFetch(
+		() =>
+			Response.json({
+				items: [
+					{
+						id: "dmn-role-reviewer",
+						content: "The reviewer cites the design doc. More.",
+						tags: ["role:reviewer"],
+						refreshed_at: "2026-06-01T00:00:00Z",
+					},
+					{
+						id: "foreign",
+						content: "another surface's model",
+						tags: ["kind:other"],
+						refreshed_at: "2026-06-01T00:00:00Z",
+					},
+					{ id: "dmn-role-operator", content: "no stamp yet", tags: ["role:operator"] },
+				],
+			}),
+		async () => {
+			models = await store.mentalModels("b");
+		},
+	);
+	expect(requests).toEqual([
+		{
+			url: "http://stub/v1/default/banks/b/mental-models",
+			method: "GET",
+			body: undefined,
+			contentType: undefined,
+		},
+	]);
+	expect(models).toEqual([
+		{
+			id: "dmn-role-reviewer",
+			role: "reviewer",
+			content: "The reviewer cites the design doc. More.",
+			refreshedAt: "2026-06-01T00:00:00Z",
+		},
+		{ id: "dmn-role-operator", role: "operator", content: "no stamp yet", refreshedAt: "" },
+	]);
+});
+
+test("createMentalModel posts the documented body to the bank's mental-models path", async () => {
+	const store = new HindsightStore({ baseUrl: "http://stub" });
+	const requests = await stubbedFetch(
+		() => Response.json({ id: "dmn-role-reviewer" }),
+		async () => {
+			await store.createMentalModel("b", {
+				id: "dmn-role-reviewer",
+				name: "dmn-role-reviewer",
+				sourceQuery:
+					"What the reviewer role's memories cover: the facts, decisions and habits this role relies on",
+				tags: ["role:reviewer"],
+				maxTokens: 512,
+			});
+		},
+	);
+	expect(requests).toEqual([
+		{
+			url: "http://stub/v1/default/banks/b/mental-models",
+			method: "POST",
+			body: {
+				id: "dmn-role-reviewer",
+				name: "dmn-role-reviewer",
+				source_query:
+					"What the reviewer role's memories cover: the facts, decisions and habits this role relies on",
+				tags: ["role:reviewer"],
+				max_tokens: 512,
+			},
+			contentType: "application/json",
+		},
+	]);
+});
+
+test("refreshMentalModel posts to the model's refresh path with no body", async () => {
+	const store = new HindsightStore({ baseUrl: "http://stub" });
+	const requests = await stubbedFetch(
+		() => Response.json({ id: "dmn-role-reviewer" }),
+		async () => {
+			await store.refreshMentalModel("b", "dmn-role-reviewer");
+		},
+	);
+	expect(requests).toEqual([
+		{
+			url: "http://stub/v1/default/banks/b/mental-models/dmn-role-reviewer/refresh",
+			method: "POST",
+			body: undefined,
+			contentType: undefined,
+		},
+	]);
+});
+
+test("a bank the store does not know lists its mental models as empty, not an error", async () => {
+	const store = new HindsightStore({ baseUrl: "http://stub" });
+	const requests = await stubbedFetch(
+		() => Response.json({ detail: "Bank 'quiet' not found" }, { status: 404 }),
+		async () => {
+			await expect(store.mentalModels("quiet")).resolves.toEqual([]);
+		},
+	);
+	expect(requests).toHaveLength(1);
+});
 
 test("bankFor maps organizations to org-<name> and no organization to generic", () => {
 	expect(bankFor("acme")).toBe("org-acme");

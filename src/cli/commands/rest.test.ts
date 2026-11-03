@@ -11,11 +11,13 @@ import { printRest, runRestCommand } from "./rest.js";
 const root = new URL("../../..", import.meta.url).pathname;
 const bank = "org-acme";
 const quietBank = "org-quiet";
+const rosterBank = "org-roster";
 const now = new Date("2026-06-01T00:00:00Z");
 
 let server: ReturnType<typeof startFakeServer>;
 let scratch: string;
 let env: Record<string, string>;
+let store: HindsightStore;
 let projectLearning: string;
 let orgLearning: string;
 
@@ -46,7 +48,7 @@ beforeAll(async () => {
 		XDG_CONFIG_HOME: join(scratch, "config"),
 		DMN_NOW: now.toISOString(),
 	};
-	const store = new HindsightStore({ baseUrl: server.url });
+	store = new HindsightStore({ baseUrl: server.url });
 	await store.retain(bank, [
 		{ content: "learning from project a", tags: ["project:a", "kind:learning"] },
 		{ content: "learning without a project", tags: ["kind:learning"] },
@@ -54,6 +56,12 @@ beforeAll(async () => {
 		{ content: "a turn, not a learning", tags: ["project:a", "kind:turn"] },
 	]);
 	await store.retain(quietBank, [{ content: "a quiet turn", tags: ["project:a", "kind:turn"] }]);
+	await store.retain(rosterBank, [
+		{
+			content: "The reviewer cites the design doc. Flaky tests are tracked.",
+			tags: ["role:reviewer"],
+		},
+	]);
 	const all = await store.list(bank, { limit: 10, offset: 0 });
 	const idOf = (text: string) => all.find((memory) => memory.text === text)?.id as string;
 	projectLearning = idOf("learning from project a");
@@ -130,4 +138,21 @@ test("rest prints the report of every bank it was asked for; --apply prints what
 	expect(applied).toMatchObject({ exitCode: 0, stderr: "" });
 	expect(applied.stdout).toContain(`promoted ${projectLearning}\n`);
 	expect(applied.stdout).toContain(`promoted ${orgLearning}\n`);
+});
+
+test("rest creates and refreshes the four role models in each bank it consolidates", async () => {
+	const report = await dmn("--bank", rosterBank);
+	expect(report).toMatchObject({ exitCode: 0, stderr: "" });
+	const models = await store.mentalModels(rosterBank);
+	expect(models.map((model) => model.id).sort()).toEqual([
+		"dmn-role-architect",
+		"dmn-role-developer",
+		"dmn-role-operator",
+		"dmn-role-reviewer",
+	]);
+	// The fake built the reviewer model's content on refresh; the roster line takes its first
+	// sentence, so the whole sentence must be there.
+	expect(models.find((model) => model.role === "reviewer")?.content).toBe(
+		"The reviewer cites the design doc. Flaky tests are tracked.",
+	);
 });

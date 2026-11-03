@@ -52,4 +52,41 @@ describe.skipIf(!storeUrl)("Hindsight contract (needs DMN_STORE_URL)", () => {
 		expect(result.operationId).toBeString();
 		expect(result.deduplicated).toBeNumber();
 	}, 120_000);
+
+	test("createMentalModel posts the roster's model and mentalModels lists it back", async () => {
+		const store = new HindsightStore({ baseUrl: storeUrl ?? "", timeoutMs: 30_000 });
+		const bank = `contract-models-${crypto.randomUUID().slice(0, 8)}`;
+		await store.retain(bank, [
+			{ content: "The reviewer cites the design doc.", tags: ["role:reviewer"] },
+		]);
+		await store.createMentalModel(bank, {
+			id: "dmn-role-reviewer",
+			name: "dmn-role-reviewer",
+			sourceQuery:
+				"What the reviewer role's memories cover: the facts, decisions and habits this role relies on",
+			tags: ["role:reviewer"],
+			maxTokens: 512,
+		});
+		const models = await store.mentalModels(bank);
+		const reviewer = models.find((model) => model.id === "dmn-role-reviewer");
+		expect(reviewer?.role).toBe("reviewer");
+		expect(reviewer?.content).toBeString();
+	}, 120_000);
+
+	test("refreshMentalModel asks the store to rebuild the model", async () => {
+		const store = new HindsightStore({ baseUrl: storeUrl ?? "", timeoutMs: 30_000 });
+		const bank = `contract-refresh-${crypto.randomUUID().slice(0, 8)}`;
+		await store.retain(bank, [
+			{ content: "The reviewer tracks flaky tests.", tags: ["role:reviewer"] },
+		]);
+		await store.createMentalModel(bank, {
+			id: "dmn-role-reviewer",
+			name: "dmn-role-reviewer",
+			sourceQuery:
+				"What the reviewer role's memories cover: the facts, decisions and habits this role relies on",
+			tags: ["role:reviewer"],
+			maxTokens: 512,
+		});
+		await store.refreshMentalModel(bank, "dmn-role-reviewer");
+	}, 120_000);
 });

@@ -52,6 +52,26 @@ export interface ConsolidationResult {
 }
 
 /**
+ * One of the store's mental models. dmn's roster keeps one per role per bank (D31); a model
+ * without a `role:` tag is not dmn's and is skipped by `mentalModels`.
+ */
+export interface MentalModel {
+	id: string;
+	role: string;
+	content: string;
+	refreshedAt: string;
+}
+
+/** The mental model `createMentalModel` posts, in the store's own terms. */
+export interface MentalModelInput {
+	id: string;
+	name: string;
+	sourceQuery: string;
+	tags: string[];
+	maxTokens: number;
+}
+
+/**
  * One store surface for recall, hooks and replay. Every call takes exactly one bank;
  * choosing banks is the caller's job through `bankFor`.
  */
@@ -64,4 +84,10 @@ export interface MemoryStore {
 	get(bank: string, id: string): Promise<MemoryRecord | null>;
 	list(bank: string, query: ListQuery): Promise<MemoryRecord[]>;
 	listTags(bank: string): Promise<TagCount[]>;
+	/** The bank's mental models, each with the role its `role:<r>` tag names; others are skipped. */
+	mentalModels(bank: string): Promise<MentalModel[]>;
+	/** Creates a mental model in the bank; dmn only ever creates and refreshes, never edits one. */
+	createMentalModel(bank: string, model: MentalModelInput): Promise<void>;
+	/** Asks the store to rebuild the model from its source query; no body is sent. */
+	refreshMentalModel(bank: string, id: string): Promise<void>;
 }

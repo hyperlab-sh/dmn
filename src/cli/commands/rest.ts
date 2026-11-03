@@ -1,6 +1,7 @@
 import { parseArgs } from "node:util";
 import { ConfigError, createStore, loadConfig, openState } from "../../config/config.js";
 import { type RestReport, runRest } from "../../rest/rest.js";
+import { rosterRoles, syncRoster } from "../../roster/roster.js";
 
 /**
  * Prints one line per bank of the report; returns the exit code. A bank whose pass failed, or
@@ -69,12 +70,17 @@ export async function runRestCommand(
 		if (Number.isNaN(now.getTime())) throw new Error("DMN_NOW is not an ISO date");
 		const state = await openState(config, () => now);
 		try {
-			const report = await runRest(createStore(config), state, config, {
+			const onWarning = (message: string) => process.stderr.write(`${message}\n`);
+			const store = createStore(config);
+			const report = await runRest(store, state, config, {
 				// --bank names banks; without it rest takes generic and every organization bank.
 				...(values.bank && { banks: values.bank }),
 				apply: values.apply === true,
 				now,
-				onWarning: (message) => process.stderr.write(`${message}\n`),
+				onWarning,
+				// Step 3: after the promotion pass, the roster sync creates the missing role models
+				// and refreshes every one (AC-18).
+				syncRoster: (bank) => syncRoster(store, bank, rosterRoles, { onWarning }),
 			});
 			return printRest(report, values.apply === true);
 		} finally {

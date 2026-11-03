@@ -117,7 +117,10 @@ rest state: consolidation, promotion of generic learnings, role summaries (roste
    walk, validity windows for decisions that were later reversed.
 4. **Rest state.** Scheduled consolidation, cross-project promotion of generic learnings (a
    learning used in two or more projects is copied to the wider scope — its organization, or
-   `generic` — and the original goes dormant), role summaries and the roster.
+   `generic` — and the original goes dormant), role summaries and the roster: one Hindsight
+   mental model per role per bank (`dmn-role-<role>`), created and refreshed by `dmn rest`;
+   `dmn hook session-start` injects one line per other role inside the budget, and
+   `dmn recall --role <r>` lists a role's memories on demand.
 
 ## 7. Non-goals
 
