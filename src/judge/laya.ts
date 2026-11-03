@@ -1,4 +1,12 @@
-import { type Judge, JudgeError, type JudgeMemory, type Judgement } from "./types.js";
+import {
+	type Classification,
+	type Judge,
+	JudgeError,
+	type JudgeMemory,
+	type Judgement,
+	type KindJudge,
+	type MemoryKind,
+} from "./types.js";
 
 const layaBaseUrl = "https://api.laya.studio";
 const batchLimit = 64;
@@ -42,6 +50,21 @@ const questions = {
 	},
 };
 
+const kindQuestions = {
+	kind: {
+		type: "choice",
+		instructions: "Which kind of memory is this text?",
+		criteria: {
+			turn: "an exchange that only makes sense inside its own session",
+			learning:
+				"a fact about the code, the tools or the environment that will hold in a later session",
+			decision: "a choice that was made and the reason for it",
+		},
+	},
+};
+
+const kinds: readonly MemoryKind[] = ["turn", "learning", "decision"];
+
 const state = (prompt: string, memory: JudgeMemory) =>
 	`Prompt from the engineer:\n${prompt}\n\nMemory from a past session:\n${memory.text.slice(0, memoryLimit)}`;
 
@@ -57,8 +80,11 @@ function retryAfterMs(response: Response, now: number): number | undefined {
 	return Number.isNaN(date) ? undefined : Math.max(0, date - now);
 }
 
-/** Usefulness judge over Laya's `/v1/systemone/batch`, plain fetch. Sends prompt and memory text only. */
-export class LayaJudge implements Judge {
+/**
+ * Usefulness and kind judge over Laya's `/v1/systemone/batch`, plain fetch. Sends text only:
+ * prompt and memory text to `judge`, the bare text to `classify`.
+ */
+export class LayaJudge implements Judge, KindJudge {
 	private readonly apiKey: string;
 	private readonly url: string;
 	private readonly timeoutMs: number;
@@ -93,10 +119,30 @@ export class LayaJudge implements Judge {
 		return judgements;
 	}
 
+	async classify(texts: string[]): Promise<Classification[]> {
+		const classifications: Classification[] = [];
+		for (let start = 0; start < texts.length; start += batchLimit) {
+			const slice = texts.slice(start, start + batchLimit);
+			const body = JSON.stringify({
+				requests: slice.map((text) => ({
+					state: text.slice(0, memoryLimit),
+					questions: kindQuestions,
+				})),
+			});
+			classifications.push(...this.parseKinds(await this.post(body), slice, start));
+		}
+		return classifications;
+	}
+
 	private async batch(prompt: string, memories: JudgeMemory[]): Promise<Judgement[]> {
 		const body = JSON.stringify({
 			requests: memories.map((memory) => ({ state: state(prompt, memory), questions })),
 		});
+		return this.parse(await this.post(body), memories);
+	}
+
+	/** One POST with the retries and timeout shared by both questions; returns the JSON payload. */
+	private async post(body: string): Promise<unknown> {
 		for (let attempt = 1; ; attempt++) {
 			let response: Response;
 			try {
@@ -110,13 +156,11 @@ export class LayaJudge implements Judge {
 				throw new JudgeError(`POST ${this.url} failed: ${(error as Error).message}`, 0);
 			}
 			if (response.ok) {
-				let payload: unknown;
 				try {
-					payload = await response.json();
+					return await response.json();
 				} catch {
 					throw new JudgeError("response is not JSON", response.status);
 				}
-				return this.parse(payload, memories);
 			}
 			const retriable = response.status === 429 || response.status === 503;
 			if (!retriable || attempt === maxAttempts) {
@@ -151,5 +195,32 @@ export class LayaJudge implements Judge {
 			judgements.push({ id: memory.id, useful: clamp(useful, 0, 1), level: clamp(level, 0, 3) });
 		});
 		return judgements;
+	}
+
+	/** `answers.kind.choice` with the chosen label's probability; anything else is unanswered. */
+	private parseKinds(payload: unknown, texts: string[], offset: number): Classification[] {
+		const results = (payload as { results?: unknown } | null)?.results;
+		if (!Array.isArray(results) || results.length !== texts.length) {
+			throw new JudgeError("response has no results matching the requests", 0);
+		}
+		const classifications: Classification[] = [];
+		texts.forEach((_, index) => {
+			const kind = (results[index] as { answers?: { kind?: { choice?: unknown } } } | null)?.answers
+				?.kind?.choice;
+			if (!kinds.includes(kind as MemoryKind)) return;
+			const probabilities = (
+				results[index] as {
+					answers?: { kind?: { probabilities?: Record<string, unknown> } };
+				} | null
+			)?.answers?.kind?.probabilities;
+			const probability = probabilities?.[kind as string];
+			if (typeof probability !== "number") return;
+			classifications.push({
+				index: offset + index,
+				kind: kind as MemoryKind,
+				probability: clamp(probability, 0, 1),
+			});
+		});
+		return classifications;
 	}
 }

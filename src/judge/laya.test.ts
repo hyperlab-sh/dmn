@@ -172,3 +172,64 @@ test("an item the service answers with an error is left out; the others stand", 
 		{ id: "m-1", useful: 0.9, level: 2 },
 	]);
 });
+
+const kindAnswer = (choice: string, probabilities: Record<string, number>) => ({
+	answers: { kind: { type: "choice", choice, probabilities } },
+});
+const okKind =
+	(count: number, choice = "turn", probability = 0.9) =>
+	() =>
+		Response.json({
+			results: Array.from({ length: count }, () => kindAnswer(choice, { [choice]: probability })),
+		});
+
+test("classify sends one kind choice question per text and maps choice and probability by index", async () => {
+	const { judge, recorded } = judgeWith([
+		() =>
+			Response.json({
+				results: [
+					kindAnswer("learning", { turn: 0.2, learning: 0.7, decision: 0.1 }),
+					{ error: { code: "invalid_request" } },
+					kindAnswer("sideways", { sideways: 1 }),
+				],
+			}),
+	]);
+	expect(await judge.classify(["first turn", "second turn", "third turn"])).toEqual([
+		{ index: 0, kind: "learning", probability: 0.7 },
+	]);
+	const [request] = recorded;
+	expect(request?.url).toBe("https://api.laya.studio/v1/systemone/batch");
+	// The state is the bare text: nothing but the text leaves the machine.
+	expect(request?.body.requests.map((item) => item.state)).toEqual([
+		"first turn",
+		"second turn",
+		"third turn",
+	]);
+	expect(request?.body.requests[0]?.questions).toEqual({
+		kind: {
+			type: "choice",
+			instructions: "Which kind of memory is this text?",
+			criteria: {
+				turn: "an exchange that only makes sense inside its own session",
+				learning:
+					"a fact about the code, the tools or the environment that will hold in a later session",
+				decision: "a choice that was made and the reason for it",
+			},
+		},
+	});
+	expect(Object.keys(request?.body.requests[0] ?? {}).sort()).toEqual(["questions", "state"]);
+});
+
+test("classify batches above 64 texts and trims each state to 1500 characters", async () => {
+	const { judge, recorded } = judgeWith([okKind(64), okKind(1, "learning", 1.4)]);
+	const texts = Array.from({ length: 65 }, (_, index) => `${index} ${"x".repeat(2000)}`);
+	const out = await judge.classify(texts);
+	expect(recorded.map((call) => call.body.requests.length)).toEqual([64, 1]);
+	expect(out).toHaveLength(65);
+	expect(out[0]).toEqual({ index: 0, kind: "turn", probability: 0.9 });
+	// The second batch's indexes continue the input's; probabilities are clamped to [0, 1].
+	expect(out[64]).toEqual({ index: 64, kind: "learning", probability: 1 });
+	expect(recorded[0]?.body.requests[0]?.state?.length).toBe(1500);
+	expect(await judge.classify([])).toEqual([]);
+	expect(recorded).toHaveLength(2);
+});

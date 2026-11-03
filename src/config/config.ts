@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { type ActivationParameters, defaultActivationParameters } from "../activation/act-r.js";
 import { LayaJudge } from "../judge/laya.js";
-import type { Judge } from "../judge/types.js";
+import type { Judge, KindJudge } from "../judge/types.js";
 import type { LocalState } from "../state/state.js";
 import { FakeStore } from "../store/fake.js";
 import { HindsightStore } from "../store/hindsight.js";
@@ -22,6 +22,8 @@ export interface JudgeConfig {
 	threshold: number;
 	/** Bar for the intrusive path, read by the judge gate. */
 	intrusionThreshold: number;
+	/** Bar a Stop-hook kind classification must clear to leave `kind:turn`. */
+	kindThreshold: number;
 	baseUrl?: string;
 	timeoutMs: number;
 }
@@ -134,7 +136,13 @@ export function loadConfig(options: LoadConfigOptions): Config {
 		retainTimeoutMs: 60_000,
 		fanCacheSeconds: 300,
 		activation: { ...defaultActivationParameters },
-		judge: { provider: "none", threshold: 0.5, intrusionThreshold: 0.7, timeoutMs: 30_000 },
+		judge: {
+			provider: "none",
+			threshold: 0.5,
+			intrusionThreshold: 0.7,
+			kindThreshold: 0.5,
+			timeoutMs: 30_000,
+		},
 	};
 
 	for (const key of numberKeys) {
@@ -210,6 +218,7 @@ function readJudge(value: unknown, defaults: JudgeConfig): JudgeConfig {
 				break;
 			case "threshold":
 			case "intrusionThreshold":
+			case "kindThreshold":
 				if (typeof entry !== "number" || !(entry >= 0 && entry <= 1)) {
 					throw new ConfigError(`config.json: "judge.${key}" must be a number from 0 to 1`);
 				}
@@ -241,7 +250,7 @@ function readJudge(value: unknown, defaults: JudgeConfig): JudgeConfig {
 export function createJudge(
 	config: Config,
 	env: Record<string, string | undefined>,
-): Judge | undefined {
+): (Judge & KindJudge) | undefined {
 	if (config.judge.provider === "none") return undefined;
 	const apiKey = env.LAYA_API_KEY;
 	if (!apiKey) {

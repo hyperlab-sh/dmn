@@ -1,7 +1,7 @@
 import type { Config } from "../config/config.js";
 import { buildCue, type Cue } from "../cue/cue.js";
 import { scanCueInput } from "../cue/scan.js";
-import type { Judge } from "../judge/types.js";
+import type { Judge, KindJudge } from "../judge/types.js";
 import { formatInjection } from "../recall/inject.js";
 import { intrude } from "../recall/intrude.js";
 import { recall } from "../recall/pipeline.js";
@@ -53,8 +53,8 @@ export interface HookDeps {
 	/** The intrusive thought's decision draw; `random` when absent. */
 	draw?: () => number;
 	now?: Date;
-	/** Gates prompt-time injections and intrusive thoughts; absent when `judge.provider` is `none`. */
-	judge?: Judge;
+	/** Gates prompt-time injections and intrusive thoughts, and classifies the kinds of the turns Stop retains; absent when `judge.provider` is `none`. */
+	judge?: Judge & KindJudge;
 	/** Receives non-fatal problems (a failed fan count); stderr in the CLI. */
 	onWarning?: (message: string) => void;
 }
@@ -174,7 +174,15 @@ async function finishTurn(event: HookEvent, deps: HookDeps): Promise<HookOutput>
 			{ role: "user", text: turns.user, documentId: turns.turnId },
 			{ role: "assistant", text: turns.assistant, documentId: turns.turnId },
 		],
-		{ now: deps.now ?? new Date() },
+		{
+			now: deps.now ?? new Date(),
+			// One classify call tags the kinds; a judge that fails costs the tags, not the turn.
+			...(deps.judge && {
+				judge: deps.judge,
+				kindThreshold: deps.config.judge.kindThreshold,
+			}),
+			...(deps.onWarning && { onJudgeError: judgeWarning(deps.onWarning) }),
+		},
 	);
 	return null;
 }

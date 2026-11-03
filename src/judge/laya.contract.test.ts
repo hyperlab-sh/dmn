@@ -20,3 +20,16 @@ test.skipIf(!apiKey)("ranks the useful memory above the unrelated one", async ()
 	expect(useful?.useful).toBeGreaterThan(unrelated?.useful ?? 1);
 	expect(useful?.level).toBeGreaterThan(unrelated?.level ?? 4);
 });
+
+test.skipIf(!apiKey)(
+	"classifies a session-only exchange as turn and a stated environment fact as learning or decision",
+	async () => {
+		const judge = new LayaJudge({ apiKey: apiKey as string, timeoutMs: 30_000 });
+		const [exchange, fact] = await judge.classify([
+			"Could you re-run the tests now? They were flaky a moment ago on my machine but not on yours.",
+			"The memory store runs on the forge host on port 8888; DMN_STORE_URL must point at it.",
+		]);
+		expect(exchange?.kind).toBe("turn");
+		expect(fact?.kind === "learning" || fact?.kind === "decision").toBe(true);
+	},
+);

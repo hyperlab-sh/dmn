@@ -12,6 +12,9 @@ const seed = "11";
 
 let server: ReturnType<typeof startFakeServer>;
 let store: HindsightStore;
+let judgeStub: ReturnType<typeof Bun.serve>;
+let judgeCalls: number;
+let judgeStates: string[];
 let scratch: string;
 let space: string;
 let emptyDirectory: string;
@@ -111,10 +114,33 @@ beforeAll(async () => {
 	for (const memory of await store.list(bankFor("acme"), { limit: 10, offset: 0 })) {
 		ids[memory.text] = memory.id;
 	}
+	judgeCalls = 0;
+	judgeStates = [];
+	// Answers the Laya batch API's kind question: a state that names jitter is a learning.
+	judgeStub = Bun.serve({
+		port: 0,
+		async fetch(request) {
+			const body = (await request.json()) as { requests: { state: string }[] };
+			judgeCalls += 1;
+			judgeStates.push(...body.requests.map((item) => item.state));
+			return Response.json({
+				results: body.requests.map((item) => ({
+					answers: {
+						kind: {
+							type: "choice",
+							choice: item.state.includes("jitter") ? "learning" : "decision",
+							probabilities: { turn: 0.1, learning: 0.9, decision: 0.9 },
+						},
+					},
+				})),
+			});
+		},
+	});
 });
 
 afterAll(() => {
 	server.stop();
+	judgeStub.stop(true);
 	rmSync(scratch, { recursive: true, force: true });
 });
 
@@ -211,4 +237,101 @@ test("stop records a co-use edge for two cited memories once, and none for one",
 	} finally {
 		state.close();
 	}
+});
+
+/** Writes a two-turn transcript and runs `dmn hook stop` over it with `judge` in the config. */
+async function stopWithJudge(
+	name: string,
+	judge: object,
+	user: string,
+	assistant: string,
+	key?: string,
+): Promise<Hook> {
+	const configHome = join(scratch, `config-${name}`);
+	mkdirSync(join(configHome, "dmn"), { recursive: true });
+	writeFileSync(
+		join(configHome, "dmn", "config.json"),
+		JSON.stringify({ organizations: { acmeorg: "acme" }, judge }),
+	);
+	const transcript = join(scratch, `${name}.jsonl`);
+	writeFileSync(
+		transcript,
+		[
+			{ type: "user", uuid: `u-${name}`, message: { role: "user", content: user } },
+			{
+				type: "assistant",
+				uuid: `a-${name}`,
+				message: { role: "assistant", content: [{ type: "text", text: assistant }] },
+			},
+		]
+			.map((entry) => JSON.stringify(entry))
+			.join("\n"),
+	);
+	const input = readFileSync(join(fixtures, "stop.json"), "utf8")
+		.replace("__CWD__", space)
+		.replace("__TRANSCRIPT__", transcript);
+	const started = performance.now();
+	const child = Bun.spawn(["bun", "src/cli/index.ts", "hook", "stop"], {
+		cwd: root,
+		env: { ...env, XDG_CONFIG_HOME: configHome, ...(key ? { LAYA_API_KEY: key } : {}) },
+		stdin: Buffer.from(input),
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const [stdout, stderr, exitCode] = await Promise.all([
+		new Response(child.stdout).text(),
+		new Response(child.stderr).text(),
+		child.exited,
+	]);
+	return { stdout, stderr, exitCode, elapsed: performance.now() - started };
+}
+
+test("stop with a judge: laya tags the stub's kinds, a missing key warns and keeps kind:turn, none asks nothing", async () => {
+	const stubUrl = `http://localhost:${judgeStub.port}`;
+	const kindOf = async (text: string) =>
+		(await store.list(bankFor("acme"), { limit: 100, offset: 0 }))
+			.find((memory) => memory.text === text)
+			?.tags.at(-1);
+
+	const tagged = await stopWithJudge(
+		"stop-judge-laya",
+		{ provider: "laya", baseUrl: stubUrl },
+		"How should the worker retry, decided once and for all?",
+		"It retries with jitter, capped at five attempts.",
+		"stub-key",
+	);
+	expect(tagged).toMatchObject({ stdout: "", exitCode: 0, stderr: "" });
+	expect(await kindOf("How should the worker retry, decided once and for all?")).toBe(
+		"kind:decision",
+	);
+	expect(await kindOf("It retries with jitter, capped at five attempts.")).toBe("kind:learning");
+	// One batch call, both retained texts, the key on the wire.
+	expect(judgeCalls).toBe(1);
+	expect(judgeStates).toHaveLength(2);
+	expect(judgeStates[0]).toContain("decided once and for all");
+
+	const noKey = await stopWithJudge(
+		"stop-judge-nokey",
+		{ provider: "laya", baseUrl: stubUrl },
+		"And the log format?",
+		"It stays newline-delimited JSON.",
+	);
+	expect(noKey.exitCode).toBe(0);
+	expect(noKey.stderr).toContain("dmn:");
+	expect(noKey.stderr).toContain("LAYA_API_KEY");
+	expect(await kindOf("And the log format?")).toBe("kind:turn");
+	expect(await kindOf("It stays newline-delimited JSON.")).toBe("kind:turn");
+	expect(judgeCalls).toBe(1);
+
+	const off = await stopWithJudge(
+		"stop-judge-none",
+		{ provider: "none", baseUrl: stubUrl },
+		"Where does the local state live?",
+		"In one SQLite file next to the config.",
+		"stub-key",
+	);
+	expect(off).toMatchObject({ stdout: "", exitCode: 0, stderr: "" });
+	expect(await kindOf("Where does the local state live?")).toBe("kind:turn");
+	expect(await kindOf("In one SQLite file next to the config.")).toBe("kind:turn");
+	expect(judgeCalls).toBe(1);
 });
