@@ -195,9 +195,11 @@ test("stop records a co-use edge for two cited memories once, and none for one",
 	const stateHome = join(scratch, "state-co-use");
 	const pair = transcriptFor("pair.jsonl", `Both [m:${a}] and [m:${b}] apply.`);
 	const one = transcriptFor("one.jsonl", `Only [m:${a}].`);
-	await run("stop", "stop.json", { transcript: pair, stateHome });
-	await run("stop", "stop.json", { transcript: pair, stateHome });
-	await run("stop", "stop.json", { transcript: one, stateHome });
+	for (const transcript of [pair, pair, one]) {
+		expect(await run("stop", "stop.json", { transcript, stateHome })).toMatchObject({
+			exitCode: 0,
+		});
+	}
 	const state = new LocalState({ directory: join(stateHome, "dmn") });
 	try {
 		const [low, high] = [a, b].sort() as [string, string];

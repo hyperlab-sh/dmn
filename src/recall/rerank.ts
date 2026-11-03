@@ -3,6 +3,7 @@ import {
 	baseLevelActivation,
 	type CueSource,
 	defaultActivationParameters,
+	defaultPromptThreshold,
 	logisticNoise,
 	spreadingActivation,
 } from "../activation/act-r.js";
@@ -22,7 +23,7 @@ export type RankedMemory = MemoryRecord & {
 
 export interface RerankOptions {
 	/** Local use counts and co-use associations. */
-	state: Pick<LocalState, "uses" | "associations" | "associationFan">;
+	state: Pick<LocalState, "uses" | "associations">;
 	parameters?: Readonly<ActivationParameters>;
 	random?: () => number;
 	now?: Date;
@@ -40,7 +41,7 @@ export function rerank(
 		parameters = defaultActivationParameters,
 		random = Math.random,
 		now = new Date(),
-		promptThreshold = -0.5,
+		promptThreshold = defaultPromptThreshold,
 	}: RerankOptions,
 ): RankedMemory[] {
 	const cueTags = new Set(softTags(cue));
