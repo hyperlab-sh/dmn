@@ -33,13 +33,13 @@ test("readTranscriptTail returns the last parseable entries and skips malformed 
 
 test("a tail longer than one chunk is read backwards with exact offsets", () => {
 	const filler = "x".repeat(200);
-	const lines = Array.from({ length: 1500 }, (_, index) => assistant(`${index} ${filler}`));
+	const lines = Array.from({ length: 3000 }, (_, index) => assistant(`${index} ${filler}`));
 	const path = write("big.jsonl", lines);
 	const entries = readTranscriptTail(path, 1000);
 	expect(entries).toHaveLength(1000);
-	expect(entryText(entries[0] as never)).toStartWith("500 ");
-	expect(entryText(entries[999] as never)).toStartWith("1499 ");
-	const offset = lines.slice(0, 500).reduce((total, text) => total + text.length + 1, 0);
+	expect(entryText(entries[0] as never)).toStartWith("2000 ");
+	expect(entryText(entries[999] as never)).toStartWith("2999 ");
+	const offset = lines.slice(0, 2000).reduce((total, text) => total + text.length + 1, 0);
 	expect(entries[0]?.offset).toBe(offset);
 });
 
