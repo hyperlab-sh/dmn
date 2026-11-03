@@ -175,3 +175,33 @@ dmn sweep --revive <id>    # clear a memory's dormancy
   once. A revived memory that is still below the floor and has not been used is marked dormant
   again by the next sweep; a cited use (or a lower `dormancyFloor`) keeps it.
 - A memory with no usable creation date is counted but never marked.
+
+## Rest
+
+`dmn rest` is the maintenance pass to run by hand or on a schedule. Per bank (`generic` and every
+organization bank by default; `--bank` to restrict) it asks the store to consolidate, then
+reports the learnings whose use crossed projects:
+
+```sh
+dmn rest                  # consolidate every bank and report the promotion proposals
+dmn rest --bank org-lab   # only the given bank(s); repeatable
+dmn rest --apply          # also promote the reported learnings
+```
+
+- **Consolidation** is the store's own maintenance (`consolidated <bank>: <n> deduplicated`); it
+  runs with or without `--apply`.
+- **Promotion**: a memory tagged `kind:learning` whose use records name two or more projects has
+  proved itself wider than the scope it was born in. One tagged `project:<p>` is proposed for
+  its organization scope (the same bank, without the `project:` tag); an organization learning
+  with no `project:` tag is proposed for `generic`. The report is one line per proposal,
+  `promote <id> <from> → <to> (projects: a, b)`; a bank with no `kind:learning` memory says so,
+  and a bank the store does not know is reported as skipped.
+- **Apply**: `dmn rest --apply` retains a copy of each proposal at the wider scope (the copy
+  carries `metadata.promoted_from` and `documentId: "promotion:<id>"`, so a repeat replaces
+  instead of duplicating), marks the original dormant and remembers the promotion so it is never
+  proposed again. Without `--apply` nothing is written to the store or to dmn's state. Nothing
+  is ever deleted: the original stays, dormant.
+
+Which projects used a memory comes from its use records: each citation is stamped with the
+project of the session that cited it (rows written before the column existed keep an empty
+project and do not count).

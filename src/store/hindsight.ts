@@ -1,4 +1,5 @@
 import type {
+	ConsolidationResult,
 	ListQuery,
 	MemoryRecord,
 	MemoryScore,
@@ -74,7 +75,7 @@ function toRecord(wire: WireMemory): MemoryRecord {
 }
 
 /** Hindsight answers 404 "Bank '<name>' not found" for a bank nobody has written to yet. */
-function isBankNotFound(error: unknown): boolean {
+export function isBankNotFound(error: unknown): boolean {
 	return (
 		error instanceof StoreError &&
 		error.status === 404 &&
@@ -143,6 +144,15 @@ export class HindsightStore implements MemoryStore {
 			{ items: wireItems, async: options.async ?? false },
 			this.retainTimeoutMs,
 		);
+	}
+
+	/** The store's own maintenance: consolidation runs with or without `--apply`. */
+	async consolidate(bank: string): Promise<ConsolidationResult> {
+		const response = await this.request<{ operation_id?: string; deduplicated?: number }>(
+			"POST",
+			this.url(bank, "/consolidate"),
+		);
+		return { operationId: response.operation_id ?? "", deduplicated: response.deduplicated ?? 0 };
 	}
 
 	async recall(bank: string, query: RecallQuery): Promise<MemoryRecord[]> {

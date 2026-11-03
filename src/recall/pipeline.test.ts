@@ -32,6 +32,7 @@ const store = {
 	get: fake.get.bind(fake),
 	list: fake.list.bind(fake),
 	listTags: fake.listTags.bind(fake),
+	consolidate: fake.consolidate.bind(fake),
 	recall: (bank: string, query: RecallQuery): Promise<MemoryRecord[]> => {
 		recalled.push(bank);
 		return fake.recall(bank, query);

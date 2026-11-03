@@ -165,7 +165,13 @@ async function finishTurn(event: HookEvent, deps: HookDeps): Promise<HookOutput>
 			return false;
 		}
 	};
-	const cited = await countCitedUses(deps.state, turns.assistant, turns.turnId, isKnown);
+	const cited = await countCitedUses(
+		deps.state,
+		turns.assistant,
+		turns.turnId,
+		cue.project,
+		isKnown,
+	);
 	deps.state.recordCoUse(cited, turns.turnId);
 	await retainTurns(
 		deps.store,

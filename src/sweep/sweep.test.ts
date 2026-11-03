@@ -105,7 +105,7 @@ test("a use lifts a memory above the floor", async () => {
 	const holder: Clock = { at: now };
 	const other = new FakeStore(() => holder.at);
 	const used = await seed(other, holder, 400, "project:widgets");
-	for (let turn = 0; turn < 40; turn++) usedState.recordUse(used, `t${turn}`);
+	for (let turn = 0; turn < 40; turn++) usedState.recordUse(used, `t${turn}`, "");
 	const result = await sweep({
 		store: other,
 		state: usedState,

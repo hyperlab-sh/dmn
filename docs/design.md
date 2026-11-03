@@ -115,8 +115,9 @@ rest state: consolidation, promotion of generic learnings, role summaries (roste
 3. **Associative substrate.** Graphiti with an ontology (organization, project, stack, role,
    task, decision, skill, person), Hebbian edge weights from co-use, activation as a graph
    walk, validity windows for decisions that were later reversed.
-4. **Rest state.** Scheduled consolidation, cross-project promotion of generic learnings, role
-   summaries and the roster.
+4. **Rest state.** Scheduled consolidation, cross-project promotion of generic learnings (a
+   learning used in two or more projects is copied to the wider scope — its organization, or
+   `generic` — and the original goes dormant), role summaries and the roster.
 
 ## 7. Non-goals
 

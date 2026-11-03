@@ -10,26 +10,34 @@ export function extractUses(text: string): Set<string> {
 }
 
 /**
- * Counts one use per id for the turn; a repeat for the same turn is ignored by the state.
- * The only caller of `recordUse`: surfacing a memory never reinforces it, citing does.
+ * Counts one use per id for the turn, under the turn's project; a repeat for the same turn
+ * is ignored by the state. The only caller of `recordUse`: surfacing a memory never
+ * reinforces it, citing does.
  */
-export function recordUses(state: LocalState, ids: Iterable<string>, turnId: string): void {
-	for (const id of ids) state.recordUse(id, turnId);
+export function recordUses(
+	state: LocalState,
+	ids: Iterable<string>,
+	turnId: string,
+	project: string,
+): void {
+	for (const id of ids) state.recordUse(id, turnId, project);
 }
 
 /**
- * Counts the memories an assistant turn cites; returns the ids counted. When `isKnown` is
- * given, ids it rejects (made up, or pasted from elsewhere) are ignored.
+ * Counts the memories an assistant turn cites, under the turn's project; returns the ids
+ * counted. When `isKnown` is given, ids it rejects (made up, or pasted from elsewhere) are
+ * ignored.
  */
 export async function countCitedUses(
 	state: LocalState,
 	assistantText: string,
 	turnId: string,
+	project: string,
 	isKnown: (id: string) => Promise<boolean> = async () => true,
 ): Promise<string[]> {
 	const cited = [...extractUses(assistantText)];
 	const known = await Promise.all(cited.map(isKnown));
 	const ids = cited.filter((_, index) => known[index]);
-	recordUses(state, ids, turnId);
+	recordUses(state, ids, turnId, project);
 	return ids;
 }

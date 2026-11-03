@@ -272,6 +272,16 @@ test("stop records one co-use edge per turn for the cited, known ids", async () 
 	expect(state.associations(g)).toEqual([{ id: d, weight: 1 }]);
 });
 
+test("stop records the cited use under the cue's project", async () => {
+	await store.retain("generic", [{ content: "zeta fact", tags: [] }]);
+	const all = await store.list("generic", { limit: 100, offset: 0 });
+	const id = all.find((memory) => memory.text === "zeta fact")?.id as string;
+	const transcript_path = cite("project.jsonl", `[m:${id}] says so.`);
+	await handleHookEvent(event({ hook_event_name: "Stop", transcript_path }), deps);
+	// Outside any space or repository the cue's project is `none`; that is what gets recorded.
+	expect(state.projectsUsing(id)).toEqual(["none"]);
+});
+
 test("a judge gates the prompt injection and the intrusive thought by their own thresholds", async () => {
 	const own = new FakeStore();
 	await own.retain("generic", [{ content: "retry with jitter", tags: [] }]);
