@@ -11,6 +11,7 @@ Usage:
   dmn sweep [--bank <b>...] [--dry-run]   mark unused, unprotected memories dormant
   dmn sweep --revive <id>   clear a memory's dormancy
   dmn rest [--apply] [--bank <b>...]   consolidate each bank; report (or apply) cross-project promotions
+  dmn recall --role <r> [--top N]   list one role's memories on demand
   dmn help
   dmn replay <transcript.jsonl>... | dmn replay score <run-dir> | dmn replay judge <run-dir>
 
@@ -41,6 +42,9 @@ switch (command) {
 		break;
 	case "rest":
 		process.exitCode = await (await import("./commands/rest.js")).runRestCommand(rest, process.env);
+		break;
+	case "recall":
+		process.exitCode = await (await import("./commands/recall.js")).runRecall(rest, process.env);
 		break;
 	case "install":
 		process.exitCode = runInstall(rest, process.env);

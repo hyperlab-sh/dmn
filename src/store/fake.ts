@@ -4,6 +4,8 @@ import type {
 	ListQuery,
 	MemoryRecord,
 	MemoryStore,
+	MentalModel,
+	MentalModelInput,
 	RecallQuery,
 	RetainItem,
 	TagCount,
@@ -34,12 +36,19 @@ function matchesTags(memoryTags: string[], wanted: string[], mode: TagsMatch): b
 	}
 }
 
+/** One mental model as the fake holds it: the input plus what the store builds. */
+interface StoredMentalModel extends MentalModelInput {
+	content: string;
+	refreshedAt: string;
+}
+
 /**
  * In-process store with Hindsight's contract and deterministic scoring: keyword overlap with
  * the query, ties by insertion order. Also the store behind `DMN_STORE_URL=fake:`.
  */
 export class FakeStore implements MemoryStore {
 	private readonly banks = new Map<string, MemoryRecord[]>();
+	private readonly models = new Map<string, StoredMentalModel[]>();
 	private counter = 0;
 
 	constructor(private readonly clock: () => Date = () => new Date()) {}
@@ -126,6 +135,55 @@ export class FakeStore implements MemoryStore {
 		}
 		return [...counts].map(([tag, count]) => ({ tag, count }));
 	}
+
+	/** The model's content, deterministically: the first line of each of the role's memories. */
+	private modelContent(bank: string, role: string): string {
+		return (this.banks.get(bank) ?? [])
+			.filter((record) => record.tags.includes(`role:${role}`))
+			.map((record) => record.text.split("\n")[0])
+			.join(" ");
+	}
+
+	async mentalModels(bank: string): Promise<MentalModel[]> {
+		const models: MentalModel[] = [];
+		for (const stored of this.models.get(bank) ?? []) {
+			const role = stored.tags.find((tag) => tag.startsWith("role:"))?.slice("role:".length);
+			// Mirrors the adapter, which lists nothing it cannot name a role for.
+			if (role === undefined) continue;
+			models.push({
+				id: stored.id,
+				role,
+				content: stored.content,
+				refreshedAt: stored.refreshedAt,
+			});
+		}
+		return models;
+	}
+
+	async createMentalModel(bank: string, model: MentalModelInput): Promise<void> {
+		const role = model.tags.find((tag) => tag.startsWith("role:"))?.slice("role:".length) ?? "";
+		const stored: StoredMentalModel = {
+			...model,
+			content: this.modelContent(bank, role),
+			refreshedAt: this.clock().toISOString(),
+		};
+		const models = this.models.get(bank) ?? [];
+		// A repeated create replaces the model instead of duplicating it.
+		const existing = models.findIndex((other) => other.id === model.id);
+		if (existing === -1) models.push(stored);
+		else models[existing] = stored;
+		this.models.set(bank, models);
+	}
+
+	async refreshMentalModel(bank: string, id: string): Promise<void> {
+		const stored = (this.models.get(bank) ?? []).find((model) => model.id === id);
+		if (!stored) {
+			throw new StoreError(`POST refresh failed: 404 Model '${id}' not found`, 404);
+		}
+		const role = stored.tags.find((tag) => tag.startsWith("role:"))?.slice("role:".length) ?? "";
+		stored.content = this.modelContent(bank, role);
+		stored.refreshedAt = this.clock().toISOString();
+	}
 }
 
 interface RecallBody {
@@ -142,6 +200,14 @@ interface RetainBody {
 		context?: string;
 		metadata?: Record<string, string>;
 	}[];
+}
+
+interface CreateMentalModelBody {
+	id: string;
+	name: string;
+	source_query: string;
+	tags?: string[];
+	max_tokens?: number;
 }
 
 function wire(record: MemoryRecord) {
@@ -211,6 +277,45 @@ export function startFakeServer(options?: {
 			if (request.method === "POST" && path === "/consolidate") {
 				if (!store.hasBank(bank)) return bankMissing;
 				return Response.json({ operation_id: "fake", deduplicated: 0 });
+			}
+			if (request.method === "GET" && path === "/mental-models") {
+				if (!store.hasBank(bank)) return bankMissing;
+				const models = await store.mentalModels(bank);
+				return Response.json({
+					items: models.map((model) => ({
+						id: model.id,
+						content: model.content,
+						tags: [`role:${model.role}`],
+						refreshed_at: model.refreshedAt,
+					})),
+				});
+			}
+			if (request.method === "POST" && path === "/mental-models") {
+				if (!store.hasBank(bank)) return bankMissing;
+				const body = (await request.json()) as CreateMentalModelBody;
+				await store.createMentalModel(bank, {
+					id: body.id,
+					name: body.name,
+					sourceQuery: body.source_query,
+					tags: body.tags ?? [],
+					maxTokens: body.max_tokens ?? 512,
+				});
+				return Response.json({ id: body.id });
+			}
+			const refresh = path.match(/^\/mental-models\/([^/]+)\/refresh$/);
+			if (request.method === "POST" && refresh?.[1]) {
+				if (!store.hasBank(bank)) return bankMissing;
+				// Refresh is a POST with no body; anything else is not this endpoint answering.
+				if (request.body) return new Response("body", { status: 400 });
+				try {
+					await store.refreshMentalModel(bank, decodeURIComponent(refresh[1]));
+				} catch (error) {
+					if (error instanceof StoreError && error.status === 404) {
+						return new Response("not found", { status: 404 });
+					}
+					throw error;
+				}
+				return Response.json({ id: decodeURIComponent(refresh[1]) });
 			}
 			if (request.method === "POST" && path === "/memories/recall") {
 				if (!store.hasBank(bank)) return bankMissing;

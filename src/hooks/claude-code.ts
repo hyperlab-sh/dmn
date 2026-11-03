@@ -2,14 +2,15 @@ import type { Config } from "../config/config.js";
 import { buildCue, type Cue } from "../cue/cue.js";
 import { scanCueInput } from "../cue/scan.js";
 import type { Judge, KindJudge } from "../judge/types.js";
-import { formatInjection } from "../recall/inject.js";
+import { estimateTokens, formatInjection } from "../recall/inject.js";
 import { intrude } from "../recall/intrude.js";
 import { recall } from "../recall/pipeline.js";
 import { retainTurns } from "../retain/retain.js";
 import { countCitedUses } from "../retain/uses.js";
+import { rosterLines } from "../roster/roster.js";
 import type { LocalState } from "../state/state.js";
 import { bankFor } from "../store/hindsight.js";
-import type { MemoryStore } from "../store/types.js";
+import type { MemoryStore, MentalModel } from "../store/types.js";
 import { lastTurns } from "../transcript/read.js";
 
 export type HookEventName = "SessionStart" | "UserPromptSubmit" | "PostToolUse" | "Stop";
@@ -121,6 +122,37 @@ function cueFor(event: HookEvent, config: Config): Cue {
 const judgeWarning = (onWarning: (message: string) => void) => (error: unknown) =>
 	onWarning(`dmn: judge: ${(error as Error).message}`);
 
+/**
+ * The roster lines of a session start: one per other role whose model the cue's banks hold —
+ * the first bank wins when both hold one — within the budget the memory lines left. A store
+ * that cannot be read costs the lines, not the injection.
+ */
+async function sessionRosterLines(
+	store: MemoryStore,
+	cue: Cue,
+	config: Config,
+	memoryLines: string,
+	onWarning?: (message: string) => void,
+): Promise<string[]> {
+	const banks = [...new Set([bankFor(cue.organization), bankFor(undefined)])];
+	try {
+		const perBank = await Promise.all(banks.map((bank) => store.mentalModels(bank)));
+		const seen = new Set<string>();
+		const models: MentalModel[] = [];
+		for (const model of perBank.flat()) {
+			if (seen.has(model.role)) continue;
+			seen.add(model.role);
+			models.push(model);
+		}
+		// The newline that would join the roster lines to the memory lines spends with them.
+		const spent = memoryLines ? estimateTokens(`${memoryLines}\n`) : 0;
+		return rosterLines(models, cue.role, config.budgetTokens - spent);
+	} catch (error) {
+		onWarning?.(`dmn: roster unavailable: ${(error as Error).message}`);
+		return [];
+	}
+}
+
 async function inject(event: HookEvent, deps: HookDeps): Promise<HookOutput> {
 	const { store, state, config, random, now, onWarning, judge } = deps;
 	const cue = cueFor(event, config);
@@ -142,7 +174,13 @@ async function inject(event: HookEvent, deps: HookDeps): Promise<HookOutput> {
 		...(random && { random }),
 		...(now && { now }),
 	});
-	const additionalContext = formatInjection(ranked, config.budgetTokens);
+	const memoryLines = formatInjection(ranked, config.budgetTokens);
+	// The roster is a session-start addition; a prompt event never repeats it.
+	const roster =
+		event.name === "SessionStart"
+			? await sessionRosterLines(store, cue, config, memoryLines, onWarning)
+			: [];
+	const additionalContext = [...(memoryLines ? [memoryLines] : []), ...roster].join("\n");
 	if (!additionalContext) return null;
 	return { hookSpecificOutput: { hookEventName: event.name, additionalContext } };
 }

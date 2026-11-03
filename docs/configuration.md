@@ -205,7 +205,40 @@ dmn rest --apply          # also promote the reported learnings
   continues with the other banks; a promotion the store refused is warned about on stderr and
   the original is left as it was, so the next run can retry it. Either makes the exit 1, so a
   scheduled run can tell.
+- **Roster**: after the promotion pass, rest creates the missing role models and refreshes
+  every one (below), so the roster sees applied copies. A create or refresh the store refuses
+  is one warning on stderr and the run continues.
 
 Which projects used a memory comes from its use records: each citation is stamped with the
 project of the session that cited it (rows written before the column existed keep an empty
 project and do not count).
+
+## Roster
+
+A session knows its own role's memories; it should also know, cheaply, what the other roles
+have learned. `dmn rest` keeps one Hindsight mental model per role per bank — `dmn-role-<role>`,
+tagged `role:<role>`, 512 tokens, over the four roles `architect`, `developer`, `reviewer`,
+`operator` — creating the missing ones and refreshing every one, so each model summarizes what
+that role's memories in that bank cover. dmn only ever creates and refreshes its models; it
+never edits or deletes one.
+
+At session start the hook appends one line per other role after the memory lines, inside the
+same `budgetTokens`:
+
+```text
+[roster:reviewer] The reviewer cites the design doc for every change.
+```
+
+The line carries the model's first sentence. A model with nothing to say yet yields no line, a
+line that does not fit the budget is dropped, and a store that cannot be read costs the lines
+(a warning on stderr), never the injection. Prompt events do not repeat the roster.
+
+```sh
+dmn recall --role reviewer              # that role's memories, one [m:<id>] line each
+dmn recall --role developer --top 3     # fewer
+```
+
+`dmn recall --role <r> [--top N]` prints the memories tagged `role:<r>` from the same two banks
+recall uses (the working directory's organization bank and `generic`), one `[m:<id>] <text>`
+line per memory in store order, dormant ids dropped, no activation rerank. `--top` defaults to
+`topK`. An unknown role exits 1 naming the four roles.

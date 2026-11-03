@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { loadConfig } from "../config/config.js";
 import { FakeJudge } from "../judge/fake.js";
 import type { Classification, Judge, Judgement, KindJudge } from "../judge/types.js";
+import { estimateTokens } from "../recall/inject.js";
+import { rosterModelId, rosterRoles, rosterSourceQuery } from "../roster/roster.js";
 import { LocalState } from "../state/state.js";
 import { FakeStore } from "../store/fake.js";
 import type { RecallQuery, RetainItem } from "../store/types.js";
@@ -30,6 +32,38 @@ class UnreachableGetStore extends FakeStore {
 	override async get(): Promise<never> {
 		throw new Error("store down");
 	}
+}
+
+/** A store whose models cannot be listed, for the roster's warning path. */
+class DownRosterStore extends FakeStore {
+	override async mentalModels(): Promise<never> {
+		throw new Error("models down");
+	}
+}
+
+/**
+ * A store holding one memory per of two roles and all four role models: the fixture the
+ * session-start roster tests reuse.
+ */
+async function rosteredStore(): Promise<FakeStore> {
+	const roster = new FakeStore(() => new Date("2026-01-01T00:00:00Z"));
+	await roster.retain("generic", [
+		{ content: "the developer keeps the build green", tags: ["role:developer"] },
+		{
+			content: "The reviewer cites the design doc. Flaky tests are tracked.",
+			tags: ["role:reviewer"],
+		},
+	]);
+	for (const role of rosterRoles) {
+		await roster.createMentalModel("generic", {
+			id: rosterModelId(role),
+			name: rosterModelId(role),
+			sourceQuery: rosterSourceQuery(role),
+			tags: [`role:${role}`],
+			maxTokens: 512,
+		});
+	}
+	return roster;
 }
 
 let directory: string;
@@ -397,4 +431,107 @@ test("stop tags the retained turns with the judge's kinds at the configured bar;
 		(await failing.list("generic", { limit: 10, offset: 0 })).map((item) => item.tags.at(-1)),
 	).toEqual(["kind:turn", "kind:turn"]);
 	expect(warnings).toEqual([expect.stringContaining("judge down")]);
+});
+
+test("session start appends one roster line per other role after the memory lines; a prompt event none", async () => {
+	const roster = await rosteredStore();
+	// The transcript's Edit makes the cue's role developer: its own model is the one not shown.
+	const developerTranscript = join(directory, "developer.jsonl");
+	writeFileSync(
+		developerTranscript,
+		JSON.stringify({
+			type: "assistant",
+			uuid: "a-developer",
+			message: {
+				role: "assistant",
+				content: [{ type: "tool_use", name: "Edit", input: { file_path: "a" } }],
+			},
+		}),
+	);
+	const start = await handleHookEvent(
+		event({
+			hook_event_name: "SessionStart",
+			source: "startup",
+			transcript_path: developerTranscript,
+		}),
+		{ ...deps, store: roster },
+	);
+	const context = start?.hookSpecificOutput.additionalContext ?? "";
+	const lines = context.split("\n");
+	// The memory lines keep their shape; the roster lines come after them.
+	expect(lines[0]).toMatch(/^\[m:/);
+	expect(lines.filter((line) => line.startsWith("[roster:"))).toEqual([
+		"[roster:reviewer] The reviewer cites the design doc.",
+	]);
+	expect(lines.at(-1)).toBe("[roster:reviewer] The reviewer cites the design doc.");
+	// The whole block, roster lines included, stays inside the budget.
+	expect(estimateTokens(context)).toBeLessThanOrEqual(deps.config.budgetTokens);
+
+	const prompt = await handleHookEvent(
+		event({
+			hook_event_name: "UserPromptSubmit",
+			prompt: "build",
+			transcript_path: developerTranscript,
+		}),
+		{ ...deps, store: roster },
+	);
+	expect(prompt?.hookSpecificOutput.additionalContext ?? "").not.toContain("[roster:");
+});
+
+test("a roster line that cannot fit the budget left by the memory lines is dropped", async () => {
+	const roster = new FakeStore(() => new Date("2026-01-01T00:00:00Z"));
+	await roster.retain("generic", [
+		// The developer memory is the only recall candidate; the reviewer one feeds its model.
+		{ content: "x".repeat(20), tags: ["role:developer"] },
+		{ content: "The reviewer cites the design doc.", tags: ["role:reviewer"] },
+	]);
+	await roster.createMentalModel("generic", {
+		id: "dmn-role-reviewer",
+		name: "dmn-role-reviewer",
+		sourceQuery: rosterSourceQuery("reviewer"),
+		tags: ["role:reviewer"],
+		maxTokens: 512,
+	});
+	const developerTranscript = join(directory, "developer.jsonl");
+	writeFileSync(
+		developerTranscript,
+		JSON.stringify({
+			type: "assistant",
+			uuid: "a-developer",
+			message: {
+				role: "assistant",
+				content: [{ type: "tool_use", name: "Edit", input: { file_path: "a" } }],
+			},
+		}),
+	);
+	// Budget 20: the memory line spends 16 tokens, leaving 4 — the 13-token roster line is dropped.
+	const tight = { ...deps, store: roster, config: { ...deps.config, budgetTokens: 20 } };
+	const output = await handleHookEvent(
+		event({
+			hook_event_name: "SessionStart",
+			source: "startup",
+			transcript_path: developerTranscript,
+		}),
+		tight,
+	);
+	const context = output?.hookSpecificOutput.additionalContext ?? "";
+	expect(context).toMatch(/^\[m:[^\]]+\] x{20}$/);
+	expect(context).not.toContain("[roster:");
+	expect(estimateTokens(context)).toBeLessThanOrEqual(20);
+});
+
+test("a store that cannot list models costs the roster lines, not the injection", async () => {
+	const roster = new DownRosterStore();
+	await roster.retain("generic", [{ content: "the developer keeps the build green", tags: [] }]);
+	const warnings: string[] = [];
+	const output = await handleHookEvent(
+		event({ hook_event_name: "SessionStart", source: "startup" }),
+		{
+			...deps,
+			store: roster,
+			onWarning: (message) => warnings.push(message),
+		},
+	);
+	expect(output?.hookSpecificOutput.additionalContext).toMatch(/^\[m:/);
+	expect(warnings).toEqual([expect.stringContaining("models down")]);
 });

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { rosterModelId, rosterRoles, rosterSourceQuery } from "../../roster/roster.js";
 import { LocalState } from "../../state/state.js";
 import { startFakeServer } from "../../store/fake.js";
 import { bankFor, HindsightStore } from "../../store/hindsight.js";
@@ -285,4 +286,48 @@ test("stop records a co-use edge for two cited memories once, and none for one",
 	} finally {
 		state.close();
 	}
+});
+
+test("session start appends one roster line per other role after the memory lines", async () => {
+	// Run last: its models stay out of the earlier session-start runs of this file.
+	await store.retain(bankFor("acme"), [
+		{
+			content: "The reviewer cites the design doc for every change. It also tracks flaky tests.",
+			tags: ["role:reviewer"],
+		},
+		{ content: "The developer keeps the build green.", tags: ["role:developer"] },
+	]);
+	for (const role of rosterRoles) {
+		await store.createMentalModel(bankFor("acme"), {
+			id: rosterModelId(role),
+			name: rosterModelId(role),
+			sourceQuery: rosterSourceQuery(role),
+			tags: [`role:${role}`],
+			maxTokens: 512,
+		});
+	}
+	// An Edit in the transcript makes the cue's role developer: the reviewer is the other role.
+	const developerTranscript = join(scratch, "developer.jsonl");
+	writeFileSync(
+		developerTranscript,
+		JSON.stringify({
+			type: "assistant",
+			uuid: "a-developer",
+			message: {
+				role: "assistant",
+				content: [{ type: "tool_use", name: "Edit", input: { file_path: "a" } }],
+			},
+		}),
+	);
+	const lines = injected(
+		await run("session-start", "session-start.json", { transcript: developerTranscript }),
+	);
+	const roster = lines.filter((line) => line.startsWith("[roster:"));
+	// One line for the reviewer's first sentence; none for the session's own role, none for
+	// the roles whose models have nothing to say yet.
+	expect(roster).toEqual(["[roster:reviewer] The reviewer cites the design doc for every change."]);
+	// The roster lines come after the memory lines, which keep their marker shape.
+	expect(lines.at(-1)).toBe(roster[0]);
+	expect(lines.length).toBeGreaterThan(roster.length);
+	expect(lines[0]).toMatch(/^\[m:/);
 });

@@ -29,6 +29,8 @@ export type {
 	MemoryRecord,
 	MemoryScore,
 	MemoryStore,
+	MentalModel,
+	MentalModelInput,
 	RecallQuery,
 	RetainItem,
 	TagCount,

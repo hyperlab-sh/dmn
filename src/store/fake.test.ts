@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { startFakeServer } from "./fake.js";
+import { FakeStore, startFakeServer } from "./fake.js";
 import { HindsightStore, StoreError } from "./hindsight.js";
 import type { MemoryRecord } from "./types.js";
 
@@ -119,4 +119,51 @@ test("a wrong base URL is an error for list and listTags, not an empty store", a
 	const wrong = new HindsightStore({ baseUrl: `${server.url}/prefix` });
 	await expect(wrong.list(bank, { limit: 1, offset: 0 })).rejects.toBeInstanceOf(StoreError);
 	await expect(wrong.listTags(bank)).rejects.toBeInstanceOf(StoreError);
+});
+
+test("mental models: create and refresh build content from the role's memories; list maps them", async () => {
+	let stamp = new Date("2026-06-01T00:00:00Z");
+	const roster = new FakeStore(() => stamp);
+	const created = {
+		id: "dmn-role-reviewer",
+		name: "dmn-role-reviewer",
+		sourceQuery: "What the reviewer role's memories cover",
+		tags: ["role:reviewer"],
+		maxTokens: 512,
+	};
+	await roster.retain("org-roster", [
+		{ content: "The reviewer cites the design doc. Second sentence.", tags: ["role:reviewer"] },
+		{ content: "first line of another\nsecond line dropped", tags: ["role:reviewer"] },
+		{ content: "a developer memory", tags: ["role:developer"] },
+	]);
+	await roster.createMentalModel("org-roster", created);
+	await expect(roster.mentalModels("org-roster")).resolves.toEqual([
+		{
+			id: "dmn-role-reviewer",
+			role: "reviewer",
+			// Only the role's memories, first line of each, joined by a space.
+			content: "The reviewer cites the design doc. Second sentence. first line of another",
+			refreshedAt: "2026-06-01T00:00:00.000Z",
+		},
+	]);
+	// Refresh rebuilds from the memories the bank holds now, and restamps.
+	await roster.retain("org-roster", [
+		{ content: "a later reviewer memory", tags: ["role:reviewer"] },
+	]);
+	stamp = new Date("2026-06-02T00:00:00Z");
+	await roster.refreshMentalModel("org-roster", "dmn-role-reviewer");
+	await expect(roster.mentalModels("org-roster")).resolves.toEqual([
+		{
+			id: "dmn-role-reviewer",
+			role: "reviewer",
+			content:
+				"The reviewer cites the design doc. Second sentence. first line of another a later reviewer memory",
+			refreshedAt: "2026-06-02T00:00:00.000Z",
+		},
+	]);
+	// The rest of the fake's contract: an unknown bank lists empty, an unknown id fails.
+	await expect(roster.mentalModels("never-written")).resolves.toEqual([]);
+	await expect(roster.refreshMentalModel("org-roster", "dmn-role-nobody")).rejects.toBeInstanceOf(
+		StoreError,
+	);
 });

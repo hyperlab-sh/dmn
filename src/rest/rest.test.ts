@@ -353,3 +353,17 @@ test("a roster step that throws is the bank's failure, and the bank's report sur
 	expect(report.banks[0]?.proposals).toHaveLength(2);
 	expect(report.banks[0]?.error).toContain("roster down");
 });
+
+test("the roster step runs for every bank rest consolidates, and never for a skipped one", async () => {
+	const synced: string[] = [];
+	const report = await runRest(seeded.store, newState(), config(), {
+		banks: [quietBank, bank, "never-written"],
+		now,
+		syncRoster: (visited) => {
+			synced.push(visited);
+		},
+	});
+	// A bank the store does not know is skipped before step 3; the others get their roster.
+	expect(synced).toEqual([quietBank, bank]);
+	expect(report.banks[2]?.consolidation).toBeNull();
+});
