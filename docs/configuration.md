@@ -70,3 +70,26 @@ a block.
 
 A memory counts as used only when the assistant cites its `[m:<id>]` marker. Turns that are
 protocol traffic, or that hold a token, a key or a `.env` assignment, are never retained.
+
+## Forgetting
+
+Memories that are never used should stop surfacing without being lost. `dmn sweep` computes each
+memory's base-level activation from its use count (creation counts as the first use) and its age,
+and marks dormant every memory below `dormancyFloor` that carries none of the `protectedTags`.
+Recall skips dormant memories. Nothing is deleted from the store; dormancy is dmn's own
+bookkeeping in `state.sqlite`.
+
+```sh
+dmn sweep                  # sweep the generic bank and every bank in `organizations`
+dmn sweep --bank org-lab   # only the given bank(s); repeatable
+dmn sweep --dry-run        # report what would go dormant, write nothing
+dmn sweep --revive <id>    # clear a memory's dormancy
+```
+
+- **Floor**: `dormancyFloor` (default `-2.0`). With the default decay, an unused memory crosses it
+  after roughly five months.
+- **Protected tags**: a memory below the floor with a tag in `protectedTags` is kept and listed as
+  protected in the output.
+- **Revive**: clears dormancy once. A revived memory that is still below the floor and has not been
+  used is marked dormant again by the next sweep; a cited use (or a higher floor) keeps it.
+- A memory with no usable creation date is counted but never marked.

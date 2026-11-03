@@ -9,6 +9,7 @@ import {
 import { type Cue, softTags } from "../cue/cue.js";
 import type { MemoryUses } from "../state/state.js";
 import type { MemoryRecord } from "../store/types.js";
+import { lifetimeHours as ageInHours } from "./age.js";
 
 export type RankedMemory = MemoryRecord & {
 	activation: number;
@@ -24,8 +25,6 @@ export interface RerankOptions {
 	random?: () => number;
 	now?: Date;
 }
-
-const millisecondsPerHour = 3_600_000;
 
 /** Orders candidates by A = B + S + ε, highest first; ties keep the input order. */
 export function rerank(
@@ -43,12 +42,8 @@ export function rerank(
 	return candidates
 		.map((memory) => {
 			const uses = state.uses(memory.id);
-			// First parseable of createdAt, then the state's firstSeenAt; otherwise now.
-			const created = [memory.createdAt, uses.firstSeenAt]
-				.map((value) => Date.parse(value ?? ""))
-				.find(Number.isFinite);
-			const lifetimeHours =
-				created === undefined ? 0 : (now.getTime() - created) / millisecondsPerHour;
+			// Unparseable dates count as brand new.
+			const lifetimeHours = ageInHours(memory.createdAt, uses.firstSeenAt, now) ?? 0;
 			// Creation counts as the first use.
 			const baseLevel = baseLevelActivation(uses.useCount + 1, lifetimeHours, parameters.decay);
 			const shared: CueSource[] = memory.tags
