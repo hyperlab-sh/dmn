@@ -8,6 +8,7 @@ import type {
 	TagsMatch,
 } from "./types.js";
 
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const wordPattern = /[\p{L}\p{N}]+/gu;
 
 function words(text: string): Set<string> {
@@ -55,7 +56,7 @@ export class FakeStore implements MemoryStore {
 		for (const item of items) {
 			this.counter += 1;
 			const record: MemoryRecord = {
-				id: `mem-${this.counter}`,
+				id: `00000000-0000-4000-8000-${String(this.counter).padStart(12, "0")}`,
 				text: item.content,
 				tags: [...item.tags],
 				createdAt: this.clock().toISOString(),
@@ -177,7 +178,9 @@ export function startFakeServer(): { url: string; stop: () => void } {
 					async: false,
 				});
 			}
+			const bankMissing = Response.json({ detail: `Bank '${bank}' not found` }, { status: 404 });
 			if (request.method === "POST" && path === "/memories/recall") {
+				if (!store.hasBank(bank)) return bankMissing;
 				const body = (await request.json()) as RecallBody;
 				const results = await store.recall(bank, {
 					query: body.query,
@@ -188,6 +191,7 @@ export function startFakeServer(): { url: string; stop: () => void } {
 				return Response.json({ results: results.map(wire) });
 			}
 			if (request.method === "GET" && path === "/memories/list") {
+				if (!store.hasBank(bank)) return bankMissing;
 				const limit = Number(url.searchParams.get("limit") ?? 100);
 				const offset = Number(url.searchParams.get("offset") ?? 0);
 				// Hindsight's documented default for the list endpoint is `any`.
@@ -201,8 +205,7 @@ export function startFakeServer(): { url: string; stop: () => void } {
 				return Response.json({ items: page.items.map(wire), total: page.total, limit, offset });
 			}
 			if (request.method === "GET" && path === "/tags") {
-				if (!store.hasBank(bank))
-					return Response.json({ detail: `Bank '${bank}' not found` }, { status: 404 });
+				if (!store.hasBank(bank)) return bankMissing;
 				const all = await store.listTags(bank);
 				const limit = Number(url.searchParams.get("limit") ?? 100);
 				const offset = Number(url.searchParams.get("offset") ?? 0);
@@ -215,6 +218,9 @@ export function startFakeServer(): { url: string; stop: () => void } {
 			}
 			const single = path.match(/^\/memories\/([^/]+)$/);
 			if (request.method === "GET" && single?.[1]) {
+				if (!uuidPattern.test(single[1])) {
+					return Response.json({ detail: `Invalid memory_id: '${single[1]}'` }, { status: 400 });
+				}
 				const record = await store.get(bank, decodeURIComponent(single[1]));
 				return record ? Response.json(wire(record)) : new Response("not found", { status: 404 });
 			}

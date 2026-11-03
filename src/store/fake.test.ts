@@ -82,7 +82,8 @@ test("get returns a retained item with its fields, and null for an unknown id", 
 	const fetched = await store.get(bank, web?.id ?? "");
 	expect(fetched?.text).toBe("the web app uses react");
 	expect(fetched?.metadata).toEqual({ source: "note" });
-	expect(await store.get(bank, "nope")).toBeNull();
+	expect(await store.get(bank, "not-a-uuid")).toBeNull();
+	expect(await store.get(bank, "00000000-0000-4000-8000-ffffffffffff")).toBeNull();
 });
 
 test("list pages through memories and filters by tag", async () => {
@@ -107,6 +108,11 @@ test("listTags counts tags per bank", async () => {
 	expect(tags).toContainEqual({ tag: "project:api", count: 3 });
 	expect(tags).toContainEqual({ tag: "project:web", count: 1 });
 	expect(await store.listTags("never-written")).toEqual([]);
+});
+
+test("recall and list of a bank nobody wrote to are empty, not errors", async () => {
+	expect(await store.list("never-written", { limit: 1, offset: 0 })).toEqual([]);
+	expect(await store.recall("never-written", { query: "x", topK: 1 })).toEqual([]);
 });
 
 test("a wrong base URL is an error for list and listTags, not an empty store", async () => {
