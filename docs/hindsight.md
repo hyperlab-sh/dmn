@@ -23,21 +23,24 @@ lives outside the repository on purpose; keep it `chmod 600` since it may hold a
 
 `HINDSIGHT_API_LLM_PROVIDER` is required: `start` exits 2 without it.
 
-Example `hindsight.env` for a developer machine:
+Example `hindsight.env` for a developer machine (the file is sourced by the shell, so `$HOME`
+and other variables expand):
 
 ```sh
 HINDSIGHT_API_LLM_PROVIDER=claude-code
 HINDSIGHT_API_LLM_MODEL=claude-sonnet-5-5
 HINDSIGHT_API_LLM_TIMEOUT=300
+HINDSIGHT_API_LLM_API_KEY=<token from `claude setup-token`>
 ```
 
-Script-level variables (not passed to the container):
+Script-level variables, also read from the env file but not passed to the container:
 
-| Variable               | Meaning                                                                          | Default                                 |
-| ---------------------- | -------------------------------------------------------------------------------- | --------------------------------------- |
-| `HINDSIGHT_CLAUDE_DIR` | Directory with a `claude` login, mounted read-write at `/home/hindsight/.claude` | unset                                   |
-| `HINDSIGHT_IMAGE`      | Image to run                                                                     | `ghcr.io/vectorize-io/hindsight:latest` |
-| `HINDSIGHT_HOST_URL`   | Base URL `status` probes                                                         | `http://127.0.0.1:8888`                 |
+| Variable               | Meaning                                                                                               | Default                 |
+| ---------------------- | ----------------------------------------------------------------------------------------------------- | ----------------------- |
+| `HINDSIGHT_CLAUDE_DIR` | Opt-in: a directory mounted read-write at `/home/hindsight/.claude` (see the warning under providers) | unset                   |
+| `HINDSIGHT_HOST_URL`   | Base URL `status` probes                                                                              | `http://127.0.0.1:8888` |
+
+The script forwards only `HINDSIGHT_API_*` variables to the container.
 
 ## Commands
 
@@ -56,17 +59,20 @@ lives in the volume.
 
 ## LLM providers
 
-| Provider                                        | Setup                                                                                                                                                                                                                              |
-| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `claude-code` (default for a developer machine) | Uses your Claude subscription. The image bundles the `claude` CLI but no login, so either set `HINDSIGHT_CLAUDE_DIR=$HOME/.claude` (reuse the host login) or put a token from `claude setup-token` in `HINDSIGHT_API_LLM_API_KEY`. |
-| `anthropic`, `openai`, others                   | `HINDSIGHT_API_LLM_PROVIDER`, `HINDSIGHT_API_LLM_MODEL` and `HINDSIGHT_API_LLM_API_KEY`. See the Hindsight configuration docs for the full list.                                                                                   |
+| Provider                                        | Setup                                                                                                                                                                                                                                               |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `claude-code` (default for a developer machine) | Uses your Claude subscription. The image bundles the `claude` CLI but no login. Default: run `claude setup-token` on the host and put the token in `HINDSIGHT_API_LLM_API_KEY`. Opt-in alternative: `HINDSIGHT_CLAUDE_DIR` (see the warning below). |
+| `anthropic`, `openai`, others                   | `HINDSIGHT_API_LLM_PROVIDER`, `HINDSIGHT_API_LLM_MODEL` and `HINDSIGHT_API_LLM_API_KEY`. See the Hindsight configuration docs for the full list.                                                                                                    |
 
 Notes for `claude-code`:
 
 - Each LLM turn drives the CLI and takes several seconds, so retain is slow; raise
   `HINDSIGHT_API_LLM_TIMEOUT` as shown above.
-- A mounted login is shared with the host's own `claude`; if token refresh ever conflicts, prefer
-  the `setup-token` route, which does not touch the host's session.
+- **Warning: `HINDSIGHT_CLAUDE_DIR`.** Mounting your `~/.claude` exposes every session
+  transcript (which can hold secrets), `settings.json` hooks, `CLAUDE.md` and MCP config to the
+  container, and the container's `claude` writes its own sessions into your host
+  `~/.claude/projects`, the corpus the replay harness reads. Prefer the token. If you mount, use a
+  dedicated directory that holds only a copied credential.
 - Use a model id your account can access. A wrong id fails retain with "issue with the selected
   model".
 
