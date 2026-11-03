@@ -45,7 +45,7 @@ Located at `$XDG_CONFIG_HOME/dmn/config.json`. Every key is optional.
 		"threshold": 0.5,
 		"intrusionThreshold": 0.7,
 		"baseUrl": "https://api.laya.studio",
-		"timeoutMs": 5000
+		"timeoutMs": 30000
 	}
 }
 ```
@@ -56,7 +56,7 @@ Located at `$XDG_CONFIG_HOME/dmn/config.json`. Every key is optional.
 | `threshold`          | `0.5`                     | `replay judge` marks a memory useful at P(useful) of at least this (0..1). |
 | `intrusionThreshold` | `0.7`                     | Bar for the intrusive path once the judge gates it (0..1). Not read yet.   |
 | `baseUrl`            | `https://api.laya.studio` | Another server speaking the same API (for example a local model).          |
-| `timeoutMs`          | `5000`                    | Per-call limit.                                                            |
+| `timeoutMs`          | `30000`                   | Per-call limit; a 64-item batch is slow, unlike a hook.                    |
 
 See [Judge with Laya](replay.md#judge-with-laya).
 
