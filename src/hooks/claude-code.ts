@@ -33,6 +33,8 @@ export type HookEvent = {
 	toolName?: string;
 	toolInput?: unknown;
 	toolResponse?: unknown;
+	/** PostToolUse: Claude Code's id of this call; it seeds the call's own draw. */
+	toolUseId?: string;
 	/** Stop. */
 	stopHookActive?: boolean;
 };
@@ -47,6 +49,8 @@ export interface HookDeps {
 	state: LocalState;
 	config: Config;
 	random?: () => number;
+	/** The intrusive thought's decision draw; `random` when absent. */
+	draw?: () => number;
 	now?: Date;
 	/** Receives non-fatal problems (a failed fan count); stderr in the CLI. */
 	onWarning?: (message: string) => void;
@@ -85,6 +89,7 @@ export function parseHookEvent(stdin: string): HookEvent {
 	const prompt = optionalString(raw.prompt);
 	const source = optionalString(raw.source);
 	const toolName = optionalString(raw.tool_name);
+	const toolUseId = optionalString(raw.tool_use_id);
 	return {
 		name: name as HookEventName,
 		sessionId: optionalString(raw.session_id) ?? "",
@@ -93,6 +98,7 @@ export function parseHookEvent(stdin: string): HookEvent {
 		...(prompt !== undefined && { prompt }),
 		...(source && { source }),
 		...(toolName && { toolName }),
+		...(toolUseId && { toolUseId }),
 		...("tool_input" in raw && { toolInput: raw.tool_input }),
 		...("tool_response" in raw && { toolResponse: raw.tool_response }),
 		...(typeof raw.stop_hook_active === "boolean" && { stopHookActive: raw.stop_hook_active }),
@@ -161,28 +167,37 @@ async function finishTurn(event: HookEvent, deps: HookDeps): Promise<HookOutput>
 	return null;
 }
 
-/** After a tool call, rarely, one memory as a single line; nothing otherwise. */
+/** After a tool call, rarely, one memory as a single line; nothing otherwise. Never an error. */
 async function intrusiveThought(event: HookEvent, deps: HookDeps): Promise<HookOutput> {
-	const { store, state, config, random, now, onWarning } = deps;
-	const memory = await intrude({
-		store,
-		state,
-		config,
-		cue: cueFor(event, config),
-		sessionId: event.sessionId,
-		toolName: event.toolName ?? "",
-		toolInput: event.toolInput,
-		...(onWarning && {
-			onFanError: (bank: string, error: unknown) =>
-				onWarning(`dmn: tag counts for bank ${bank} unavailable: ${(error as Error).message}`),
-		}),
-		...(random && { random }),
-		...(now && { now }),
-	});
-	if (!memory) return null;
-	const additionalContext = formatInjection([memory], config.budgetTokens);
-	if (!additionalContext) return null;
-	return { hookSpecificOutput: { hookEventName: event.name, additionalContext } };
+	const { store, state, config, random, draw, now, onWarning } = deps;
+	try {
+		const memory = await intrude({
+			store,
+			state,
+			config,
+			cue: cueFor(event, config),
+			sessionId: event.sessionId,
+			toolName: event.toolName ?? "",
+			toolInput: event.toolInput,
+			...(onWarning && {
+				onFanError: (bank: string, error: unknown) =>
+					onWarning(`dmn: tag counts for bank ${bank} unavailable: ${(error as Error).message}`),
+			}),
+			...(random && { random }),
+			...(draw && { draw }),
+			...(now && { now }),
+		});
+		if (!memory) return null;
+		const additionalContext = formatInjection([memory], config.budgetTokens);
+		// The cooldown restarts only with something printed.
+		if (!additionalContext) return null;
+		state.markIntrusion(event.sessionId);
+		return { hookSpecificOutput: { hookEventName: event.name, additionalContext } };
+	} catch (error) {
+		// Optional noise must not cost the developer an error after every tool call.
+		onWarning?.(`dmn: intrusive recall failed: ${(error as Error).message}`);
+		return null;
+	}
 }
 
 /** One branch per event. */

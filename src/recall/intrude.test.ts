@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { seededRandom } from "../cli/commands/hook.js";
+import { intrusionDraw } from "../activation/random.js";
 import type { Cue } from "../cue/cue.js";
-import { decideIntrusion, intrusionCue } from "./intrude.js";
+import { decideIntrusion, intrusionCue, isEligible } from "./intrude.js";
 import type { RankedMemory } from "./rerank.js";
 
 const candidate = (id: string, activation: number): RankedMemory => ({
@@ -15,42 +15,46 @@ const candidate = (id: string, activation: number): RankedMemory => ({
 	noise: 0,
 });
 
-// Activation 1.5 against threshold 0.5 is a probability of about 0.98: only a draw above it loses.
+// Activation equal to the threshold is a probability of exactly 0.5: a draw below it wins.
 const config = { intrusionThreshold: 0.5, intrusionCooldown: 3 };
-const strong = [candidate("top", 1.5), candidate("second", 1.4)];
+const strong = [candidate("top", 0.5), candidate("second", 0.4)];
 const weak = [candidate("weak", -3)];
 
 test("the top candidate surfaces when its probability beats the draw and the cooldown is over", () => {
-	const decide = (ranked: RankedMemory[], draw: number, toolCallsSinceLast: number, cooldown = 3) =>
-		decideIntrusion({
-			ranked,
-			config: { ...config, intrusionCooldown: cooldown },
-			random: () => draw,
-			toolCallsSinceLast,
-		});
-	expect(decide(strong, 0.5, 3)?.id).toBe("top");
-	expect(decide(strong, 0.999, 3)).toBeNull();
-	expect(decide(weak, 0.5, 3)).toBeNull();
+	const decide = (ranked: RankedMemory[], draw: number, toolCallsSinceLast: number) =>
+		decideIntrusion({ ranked, config, random: () => draw, toolCallsSinceLast });
+	expect(decide(strong, 0.49, 3)?.id).toBe("top");
+	expect(decide(strong, 0.51, 3)).toBeNull();
+	expect(decide(weak, 0.49, 3)).toBeNull();
 	expect(decide([], 0, 3)).toBeNull();
 	expect(decide(strong, 0, 2)).toBeNull();
 	expect(decide(strong, 0, Number.POSITIVE_INFINITY)?.id).toBe("top");
-	expect(
-		decideIntrusion({
-			ranked: strong,
-			config: { ...config, intrusionThreshold: null },
-			random: () => 0,
-			toolCallsSinceLast: 99,
-		}),
-	).toBeNull();
+	expect(isEligible({ ...config, intrusionThreshold: null }, 99)).toBe(false);
+	expect(isEligible(config, 3)).toBe(true);
+	expect(isEligible(config, 2)).toBe(false);
 });
 
 test("five calls with a cooldown of 3 emit on the first and the fifth only", () => {
-	// The generator the hook test pins with DMN_SEED: its first draw is 0.304, which wins.
-	const random = seededRandom("11");
+	// The draws the hook test pins with DMN_SEED=24 and tool_use_ids tool-1..tool-5:
+	// 0.405 0.600 0.473 0.660 0.365. Calls 1 and 5 win at p = 0.5; call 3 would win too if the
+	// cooldown did not hold it back.
+	const draws = [1, 2, 3, 4, 5].map((call) => intrusionDraw("24", `tool-${call}`));
+	expect(draws.map((draw) => draw.toFixed(3))).toEqual([
+		"0.405",
+		"0.600",
+		"0.473",
+		"0.660",
+		"0.365",
+	]);
 	let toolCallsSinceLast = Number.POSITIVE_INFINITY;
 	const emitted: boolean[] = [];
-	for (let call = 1; call <= 5; call++) {
-		const memory = decideIntrusion({ ranked: strong, config, random, toolCallsSinceLast });
+	for (const draw of draws) {
+		const memory = decideIntrusion({
+			ranked: strong,
+			config,
+			random: () => draw,
+			toolCallsSinceLast,
+		});
 		emitted.push(memory !== null);
 		toolCallsSinceLast = memory ? 0 : toolCallsSinceLast + 1;
 	}
@@ -79,9 +83,13 @@ test("the query holds the tool's target words and the session cue's phrase", () 
 	expect(bash.query).toStartWith("bun test ");
 	expect(bash.cue.task).toBe("test");
 
-	// A command word that could carry a secret never reaches the query.
-	const secret = intrusionCue(cue, "Bash", { command: "curl -H Authorization:sk-123 x" });
-	expect(secret.query).toBe(`curl ${phrase} unknown`);
+	// Only the command name and a letters-only subcommand reach the query, never an argument.
+	const secret = intrusionCue(cue, "Bash", { command: "echo sk-abc123" });
+	expect(secret.query).toStartWith("echo ");
+	expect(secret.query).not.toContain("sk-");
+	expect(
+		intrusionCue(cue, "Bash", { command: "curl -H Authorization:sk-123 x" }).query,
+	).toStartWith("curl developer");
 	expect(intrusionCue(cue, "Bash", { command: "API_KEY=abc run" }).query).toBe(`${phrase} unknown`);
 
 	const other = intrusionCue(cue, "WebSearch", { query: "anything" });

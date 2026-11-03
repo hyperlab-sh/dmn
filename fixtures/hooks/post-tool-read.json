@@ -1,5 +1,6 @@
 {
 	"session_id": "session-1",
+	"tool_use_id": "__TOOL_USE_ID__",
 	"transcript_path": "__TRANSCRIPT__",
 	"cwd": "__CWD__",
 	"hook_event_name": "PostToolUse",

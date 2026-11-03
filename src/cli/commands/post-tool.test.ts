@@ -15,8 +15,12 @@ let space: string;
 let env: Record<string, string>;
 let seeded: Set<string>;
 
-async function postTool(fixture: string): Promise<{ stdout: string; exitCode: number }> {
+async function postTool(
+	fixture: string,
+	toolUseId: string,
+): Promise<{ stdout: string; exitCode: number }> {
 	const input = readFileSync(join(fixtures, fixture), "utf8")
+		.replace("__TOOL_USE_ID__", toolUseId)
 		.replace("__CWD__", space)
 		.replace("__TRANSCRIPT__", join(fixtures, "transcript.jsonl"));
 	const started = performance.now();
@@ -44,7 +48,7 @@ beforeAll(async () => {
 		join(scratch, "config", "dmn", "config.json"),
 		JSON.stringify({
 			organizations: { acmeorg: "acme" },
-			intrusionThreshold: -6, // DMN_NOW is decades after the memories, so their activation is far below zero
+			intrusionThreshold: -5.75, // DMN_NOW is decades after the memories, so their activation is far below zero
 			intrusionCooldown: 3,
 		}),
 	);
@@ -54,8 +58,8 @@ beforeAll(async () => {
 		DMN_STORE_URL: server.url,
 		XDG_STATE_HOME: join(scratch, "state"),
 		XDG_CONFIG_HOME: join(scratch, "config"),
-		// The seed the decision table uses: a fresh generator per process, so every call draws the same.
-		DMN_SEED: "11",
+		// The seed of the decision table in intrude.test.ts: each call draws from its own tool_use_id.
+		DMN_SEED: "24",
 		DMN_NOW: "2100-01-01T00:00:00Z",
 	};
 	const store = new HindsightStore({ baseUrl: server.url });
@@ -84,8 +88,8 @@ test("five tool calls with a cooldown of 3 surface one memory on the first and f
 		"post-tool-read.json",
 	];
 	const outputs: string[] = [];
-	for (const fixture of calls) {
-		const hook = await postTool(fixture);
+	for (const [index, fixture] of calls.entries()) {
+		const hook = await postTool(fixture, `tool-${index + 1}`);
 		expect(hook.exitCode).toBe(0);
 		outputs.push(hook.stdout);
 	}

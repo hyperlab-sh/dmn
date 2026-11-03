@@ -56,13 +56,15 @@ With that file, a session in `/work/lab/some-space/...` recalls from the `hyperl
 
 A developer sometimes remembers something when a file opens or a test fails, without asking.
 After a tool call, `dmn hook post-tool` runs the prompt-time recall keyed by the tool's target (a
-file's name and directory, or a command's first plain words) and the session's cue, keeping the
-top 3 candidates. The best one surfaces as a single line, `[m:<id>] <text>`, only when its
-retrieval probability against `intrusionThreshold` beats a random draw. Most calls print nothing.
+file's name and directory, or a command's name and letters-only subcommand) and the session's
+cue, fetching 3 candidates per bank and reranking them. The best one surfaces as a single line,
+`[m:<id>] <text>`, only when its retrieval probability against `intrusionThreshold` beats a
+random draw. Most calls print nothing.
 
 - `intrusionThreshold` (default `0.5`): a memory whose activation equals it surfaces half the
   time; a higher value makes intrusions rarer. It is higher than prompt-time recall on purpose.
-- `intrusionCooldown` (default `5`): after a thought, this many tool calls pass before the next can surface. A session with no thought yet is never in cooldown.
+- `intrusionCooldown` (default `5`): after a thought, this many tool calls pass before the next
+  can surface. A session with no thought yet is never in cooldown.
 - To turn intrusive thoughts off, set `"intrusionThreshold": null`. The hook then neither
   recalls nor prints.
 
