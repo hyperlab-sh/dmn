@@ -93,6 +93,7 @@ dmn sweep --revive <id>    # clear a memory's dormancy
   swept by default; name them with `--bank org-<owner>`.
 - **Protected tags**: a memory below the floor with a tag in `protectedTags` is kept and listed as
   protected in the output.
-- **Revive**: `--revive` cannot be combined with `--dry-run` or `--bank`. It clears dormancy once. A revived memory that is still below the floor and has not been
-  used is marked dormant again by the next sweep; a cited use (or a higher floor) keeps it.
+- **Revive**: `--revive` cannot be combined with `--dry-run` or `--bank`. It clears dormancy
+  once. A revived memory that is still below the floor and has not been used is marked dormant
+  again by the next sweep; a cited use (or a lower `dormancyFloor`) keeps it.
 - A memory with no usable creation date is counted but never marked.
