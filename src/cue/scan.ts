@@ -109,15 +109,24 @@ function readTranscript(transcriptPath: string | undefined): TranscriptFacts {
 		return facts;
 	}
 	for (const line of lines.slice(-transcriptTailLines)) {
-		const command = /<command-name>\/?([^<\s]+)<\/command-name>/.exec(line);
-		if (command?.[1]) facts.activeSkill = command[1];
-		let entry: { message?: { content?: unknown } };
+		let entry: { type?: string; message?: { role?: string; content?: unknown } };
 		try {
 			entry = JSON.parse(line);
 		} catch {
 			continue;
 		}
 		const content = entry.message?.content;
+		if (entry.type === "user" || entry.message?.role === "user") {
+			// Slash commands are typed by the user: never read them from tool results or assistant text.
+			const typed = Array.isArray(content)
+				? content.map((block) => (block?.type === "text" ? block.text : ""))
+				: [content];
+			for (const text of typed) {
+				const command =
+					typeof text === "string" ? /<command-name>\/?([^<\s]+)<\/command-name>/.exec(text) : null;
+				if (command?.[1]) facts.activeSkill = command[1];
+			}
+		}
 		if (!Array.isArray(content)) continue;
 		for (const block of content) {
 			if (block?.type !== "tool_use" || typeof block.name !== "string") continue;

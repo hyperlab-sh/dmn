@@ -63,10 +63,21 @@ test("Bash command text never reaches recentTools", () => {
 	expect(result.recentTools).toEqual(["Bash", "Bash:test"]);
 });
 
+test("a slash command quoted in a tool result is not an active skill", () => {
+	const quoted = JSON.stringify({
+		type: "user",
+		message: {
+			role: "user",
+			content: [{ type: "tool_result", content: "<command-name>/ship</command-name>" }],
+		},
+	});
+	expect(scanTranscript([quoted], "quoted.jsonl").activeSkill).toBeUndefined();
+});
+
 test("only the last 50 transcript lines are read", () => {
 	const lines = [
 		...Array.from({ length: 10 }, () => toolUse("Skill", { skill: "code-review" })),
-		...Array.from({ length: 50 }, () => toolUse("Read", {})),
+		...Array.from({ length: 50 }, () => toolUse("Read", { padding: "x".repeat(8 * 1024) })),
 	];
 	const result = scanTranscript(lines, "long.jsonl");
 	expect(result.activeSkill).toBeUndefined();
