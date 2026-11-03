@@ -10,4 +10,5 @@ proposed for its organization scope, an organization learning for the `generic` 
 never proposed again, and without `--apply` nothing is written. Nothing is ever deleted. Use
 records now carry the project of the session that cited them (`use_events.project`, added on open
 to existing state files); `recordUse` and `countCitedUses` take it, and the Stop hook passes the
-cue's project. `MemoryStore` gains `consolidate`.
+cue's project. `MemoryStore` gains `consolidate`. A bank whose pass fails is reported and the run
+continues; a refused promotion or a failed bank makes the exit 1, so scheduled runs can tell.

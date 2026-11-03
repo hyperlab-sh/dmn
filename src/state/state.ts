@@ -211,6 +211,22 @@ export class LocalState {
 	}
 
 	/**
+	 * Marks the original dormant and records its promotion as one write at one timestamp, so a
+	 * crash between the two cannot leave it dormant but unrecorded (`dmn rest --apply`).
+	 */
+	markPromoted(memoryId: string, scope: string): void {
+		const at = this.clock().toISOString();
+		this.database.transaction(() => {
+			this.database
+				.query("INSERT OR IGNORE INTO dormant (memory_id, dormant_at) VALUES (?, ?)")
+				.run(memoryId, at);
+			this.database
+				.query("INSERT OR IGNORE INTO promotions (memory_id, scope, at) VALUES (?, ?, ?)")
+				.run(memoryId, scope, at);
+		})();
+	}
+
+	/**
 	 * Tool calls since the session's last intrusion, not counting the current one.
 	 * Infinity until the session has had one: the cooldown only follows an emission.
 	 */

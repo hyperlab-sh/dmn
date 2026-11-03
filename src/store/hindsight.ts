@@ -1,3 +1,4 @@
+import { isBankNotFound, StoreError } from "./errors.js";
 import type {
 	ConsolidationResult,
 	ListQuery,
@@ -8,6 +9,9 @@ import type {
 	RetainItem,
 	TagCount,
 } from "./types.js";
+
+// The error contract lives in ./errors.js; re-exported here for the package's public API.
+export { isBankNotFound, StoreError } from "./errors.js";
 
 const genericBank = "generic";
 const tagPageSize = 100;
@@ -20,15 +24,13 @@ export function bankFor(organization: string | undefined): string {
 	return `org-${organization}`;
 }
 
-/** `status` is the HTTP status, or 0 when no response arrived or the data is unusable. */
-export class StoreError extends Error {
-	constructor(
-		message: string,
-		readonly status: number,
-	) {
-		super(message);
-		this.name = "StoreError";
-	}
+/**
+ * The tag form of an organization, should a memory ever carry one (`org:<name>`); the bank is
+ * its only real home (D6), so nothing in dmn writes the tag today. A promotion copy entering
+ * the `generic` bank drops it.
+ */
+export function isOrganizationTag(tag: string): boolean {
+	return tag.startsWith("org:");
 }
 
 export interface HindsightOptions {
@@ -72,15 +74,6 @@ function toRecord(wire: WireMemory): MemoryRecord {
 		record.score = score;
 	}
 	return record;
-}
-
-/** Hindsight answers 404 "Bank '<name>' not found" for a bank nobody has written to yet. */
-export function isBankNotFound(error: unknown): boolean {
-	return (
-		error instanceof StoreError &&
-		error.status === 404 &&
-		/failed: 404 [\s\S]*bank/i.test(error.message)
-	);
 }
 
 /** Hindsight over its REST API with plain `fetch`; no SDK, no runtime dependency. */
