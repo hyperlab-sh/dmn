@@ -135,7 +135,7 @@ test.each([400, 401, 402, 422])("throws JudgeError naming %d without retrying", 
 });
 
 test("a malformed or non-JSON 2xx response is a JudgeError", async () => {
-	const bad = judgeWith([() => Response.json({ results: [{ error: "bad" }] })]);
+	const bad = judgeWith([() => Response.json({ results: [] })]);
 	await expect(bad.judge.judge("p", [memory("a")])).rejects.toBeInstanceOf(JudgeError);
 	const html = judgeWith([() => new Response("<html>", { status: 200 })]);
 	await expect(html.judge.judge("p", [memory("a")])).rejects.toThrow("response is not JSON");
@@ -159,4 +159,16 @@ test("Retry-After as an HTTP date is read against the injected clock", async () 
 	await judge.judge("p", [memory("a")]);
 	expect(recorded).toHaveLength(2);
 	expect(sleeps).toEqual([10_000]);
+});
+
+test("an item the service answers with an error is left out; the others stand", async () => {
+	const { judge } = judgeWith([
+		() =>
+			Response.json({
+				results: [answers(0.9, 2), { error: { code: "invalid_request" } }],
+			}),
+	]);
+	expect(await judge.judge("p", [memory("m-1"), memory("m-2")])).toEqual([
+		{ id: "m-1", useful: 0.9, level: 2 },
+	]);
 });

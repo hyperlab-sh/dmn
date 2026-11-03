@@ -137,7 +137,8 @@ export class LayaJudge implements Judge {
 		if (!Array.isArray(results) || results.length !== memories.length) {
 			throw new JudgeError("response has no results matching the requests", 0);
 		}
-		return memories.map((memory, index) => {
+		const judgements: Judgement[] = [];
+		memories.forEach((memory, index) => {
 			const answers = (
 				results[index] as {
 					answers?: { useful?: { noul?: unknown }; level?: { score?: unknown } };
@@ -145,10 +146,10 @@ export class LayaJudge implements Judge {
 			)?.answers;
 			const useful = answers?.useful?.noul;
 			const level = answers?.level?.score;
-			if (typeof useful !== "number" || typeof level !== "number") {
-				throw new JudgeError(`result ${index} has no useful/level answers`, 0);
-			}
-			return { id: memory.id, useful: clamp(useful, 0, 1), level: clamp(level, 0, 3) };
+			// An item the service answered with {error} is left unanswered; the rest stand.
+			if (typeof useful !== "number" || typeof level !== "number") return;
+			judgements.push({ id: memory.id, useful: clamp(useful, 0, 1), level: clamp(level, 0, 3) });
 		});
+		return judgements;
 	}
 }
