@@ -229,10 +229,13 @@ function wire(record: MemoryRecord) {
  * Serves the Hindsight endpoints dmn uses on a free localhost port, backed by a `FakeStore`.
  * `options.judgeBatch`, when given, also answers the Laya judge API's
  * `POST /v1/systemone/batch`, so a hook test needs no second server; it returns the batch's
- * `results` array for the request items it receives.
+ * `results` array for the request items it receives. `options.failRetainOn`, when given, is
+ * consulted for every retain request and answers 500 for the bodies it accepts — the seam a
+ * test uses to point dmn at a store whose retain fails.
  */
 export function startFakeServer(options?: {
 	judgeBatch?: (requests: { state: string; questions?: unknown }[]) => unknown[];
+	failRetainOn?: (body: RetainBody) => boolean;
 }): { url: string; stop: () => void } {
 	const store = new FakeStore();
 	const server = Bun.serve({
@@ -260,6 +263,10 @@ export function startFakeServer(options?: {
 
 			if (request.method === "POST" && path === "/memories") {
 				const body = (await request.json()) as RetainBody;
+				// A retain the test chose to fail: the 500 the adapter reports as a failed retain.
+				if (options?.failRetainOn?.(body)) {
+					return Response.json({ detail: "simulated retain failure" }, { status: 500 });
+				}
 				await store.retain(
 					bank,
 					body.items.map((item) => ({

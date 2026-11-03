@@ -72,17 +72,44 @@ Hindsight keeps its own data (the embedded `pg0` database) under `~/.hindsight`;
 
 ## LLM providers
 
-| Provider                                          | Setup                                                                                                                                                                      |
-| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `claude-code` (default for a single-user machine) | Uses the Claude subscription of the user the server runs as. `claude` must be on PATH and logged in (`claude auth login`); no credential is copied or configured anywhere. |
-| `anthropic`, `openai`, others                     | `HINDSIGHT_API_LLM_PROVIDER`, `HINDSIGHT_API_LLM_MODEL` and `HINDSIGHT_API_LLM_API_KEY`. See the Hindsight configuration docs for the full list.                           |
+| Provider                      | Setup                                                                                                                                                                      |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `claude-code`                 | Uses the Claude subscription of the user the server runs as. `claude` must be on PATH and logged in (`claude auth login`); no credential is copied or configured anywhere. |
+| `anthropic`, `openai`, others | `HINDSIGHT_API_LLM_PROVIDER`, `HINDSIGHT_API_LLM_MODEL` and `HINDSIGHT_API_LLM_API_KEY`. See the Hindsight configuration docs for the full list.                           |
 
 Notes for `claude-code`:
 
+- Anthropic's usage safeguard refuses fact extraction over Claude Code transcripts with this
+  provider: retain over your own Claude history answers `[reasoning_extraction]`. Ingesting
+  past Claude sessions (`dmn backfill`, `dmn replay --as-live`) therefore needs another
+  provider for that store; `claude-code` still serves stores seeded from other sources.
 - Each LLM turn drives the `claude` CLI and takes several seconds, so retain is slow; raise
   `HINDSIGHT_API_LLM_TIMEOUT` as shown above.
 - Use a model id your account can access. A wrong id fails retain with "issue with the selected
   model".
+
+### Throttling a rate-limited provider
+
+A seeding run retains one prompt after another for hours, and a provider with a low
+request-rate limit answers 429 for much of it. Retrying is Hindsight's own policy — dmn counts
+a failed retain and moves on — and these knobs control it, plus how many LLM calls run at
+once. Set them in `hindsight.env`:
+
+| Variable                            | Meaning                         |
+| ----------------------------------- | ------------------------------- |
+| `HINDSIGHT_API_LLM_MAX_CONCURRENT`  | LLM requests in flight at once  |
+| `HINDSIGHT_API_LLM_MAX_RETRIES`     | Retries per failed LLM request  |
+| `HINDSIGHT_API_LLM_INITIAL_BACKOFF` | Wait before the first retry     |
+| `HINDSIGHT_API_LLM_MAX_BACKOFF`     | Ceiling the retry wait grows to |
+
+```sh
+# A low request-rate limit: one call at a time, retried patiently.
+HINDSIGHT_API_LLM_PROVIDER=zai
+HINDSIGHT_API_LLM_MAX_CONCURRENT=1
+HINDSIGHT_API_LLM_MAX_RETRIES=8
+HINDSIGHT_API_LLM_INITIAL_BACKOFF=2
+HINDSIGHT_API_LLM_MAX_BACKOFF=120
+```
 
 ## Check it works
 

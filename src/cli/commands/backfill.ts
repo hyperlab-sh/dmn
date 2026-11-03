@@ -12,7 +12,9 @@ Seeds the store from past sessions: each prompt's user and assistant turns are r
 through the same filter the Stop hook applies, stamped with the prompt's recorded time so
 backfilled memories carry their content time, never the ingest time. --max-turns limits the
 prompts taken per transcript (default 40). --dry prints what would be retained and writes
-nothing; it needs no store.
+nothing; it needs no store. A retain the store rejects does not stop the run: the transcript's
+line counts it as failed= and the walk goes on; the exit code is 1 only when nothing was
+retained at all. Failed retains are not retried: the retry policy is Hindsight's own.
 `;
 
 /** What one transcript contributed: the line `--dry` and the report print. */
@@ -20,12 +22,15 @@ interface TranscriptTally {
 	path: string;
 	prompts: number;
 	retained: number;
+	/** Prompts whose retain the store rejected (D37); shown as `failed=` when above zero. */
+	failed: number;
 	skipped: Map<string, number>;
 }
 
 function lineOf(tally: TranscriptTally): string {
 	const reasons = [...tally.skipped].map(([reason, count]) => ` ${reason}=${count}`).join("");
-	return `${tally.path}: prompts=${tally.prompts} retained=${tally.retained} skipped=${tally.skipped.size > 0 ? [...tally.skipped.values()].reduce((a, b) => a + b, 0) : 0}${reasons}`;
+	const failed = tally.failed > 0 ? ` failed=${tally.failed}` : "";
+	return `${tally.path}: prompts=${tally.prompts} retained=${tally.retained}${failed} skipped=${tally.skipped.size > 0 ? [...tally.skipped.values()].reduce((a, b) => a + b, 0) : 0}${reasons}`;
 }
 
 /** Runs `dmn backfill <transcripts...> [--max-turns <n>] [--dry]`; returns the exit code. */
@@ -71,10 +76,11 @@ export async function runBackfill(
 		// One line and one --max-turns count per given path: basenames may collide across
 		// directories, and a transcript that holds no prompt still gets its line.
 		const tally = new Map<string, TranscriptTally>(
-			files.map((path) => [path, { path, prompts: 0, retained: 0, skipped: new Map() }]),
+			files.map((path) => [path, { path, prompts: 0, retained: 0, failed: 0, skipped: new Map() }]),
 		);
 		const taken = new Map<string, number>();
 		let totalRetained = 0;
+		let failedRetains = 0;
 		for (const prompt of ordered) {
 			const seen = taken.get(prompt.path) ?? 0;
 			// At most --max-turns prompts per transcript; the rest are history left alone.
@@ -90,15 +96,28 @@ export async function runBackfill(
 				recentTools: prompt.recentTools,
 				organizations: config.organizations,
 			});
-			const result = await retainPrompt(store, cue, prompt, prompt.answer, new Date(prompt.at));
-			current.retained += result.retained;
-			totalRetained += result.retained;
-			for (const { reason } of result.skipped) {
-				current.skipped.set(reason, (current.skipped.get(reason) ?? 0) + 1);
+			// A retain the store rejects is counted on its transcript's line and the walk goes on
+			// (D37); it is never retried — the retry policy is Hindsight's own.
+			try {
+				const result = await retainPrompt(store, cue, prompt, prompt.answer, new Date(prompt.at));
+				current.retained += result.retained;
+				totalRetained += result.retained;
+				for (const { reason } of result.skipped) {
+					current.skipped.set(reason, (current.skipped.get(reason) ?? 0) + 1);
+				}
+			} catch {
+				current.failed += 1;
+				failedRetains += 1;
 			}
 		}
 		for (const current of tally.values()) process.stdout.write(`${lineOf(current)}\n`);
 		if (!dry) process.stdout.write(`total retained ${totalRetained}\n`);
+		// Nothing landed at all and at least one retain failed: the run seeded nothing, so say
+		// so and fail. Skips alone (secrets) are a filter verdict, not a failure.
+		if (!dry && failedRetains > 0 && totalRetained === 0) {
+			process.stderr.write("dmn: backfill: nothing was retained\n");
+			return 1;
+		}
 		return 0;
 	} catch (error) {
 		if (error instanceof UntimedPromptError) {

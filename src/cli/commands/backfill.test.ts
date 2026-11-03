@@ -12,6 +12,9 @@ const fixture = join(root, "fixtures/replay/live-a.jsonl");
 let scratch: string;
 let server: ReturnType<typeof startFakeServer>;
 let store: HindsightStore;
+/** What the server does with a retain request: nothing, or 500 for the content it accepts. */
+let failRetain: (content: string) => boolean = () => false;
+let retainCalls = 0;
 
 /** Calls the command in-process with a captured stdout/stderr; backfill takes env as an arg. */
 async function backfill(
@@ -41,7 +44,13 @@ async function backfill(
 
 beforeAll(() => {
 	scratch = mkdtempSync(join(tmpdir(), "dmn-backfill-test-"));
-	server = startFakeServer();
+	server = startFakeServer({
+		// Every retain request is counted; the bodies the test chose answer 500 (a failing store).
+		failRetainOn: (body) => {
+			retainCalls += 1;
+			return body.items.some((item) => failRetain(item.content));
+		},
+	});
 	store = new HindsightStore({ baseUrl: server.url });
 });
 afterAll(() => {
@@ -152,6 +161,44 @@ test("without a store URL the real run exits 2 naming it; --dry needs none; a tr
 	const badTime = await backfill(["--dry", untimed], { HOME: "/home/test" });
 	expect(badTime.code).toBe(2);
 	expect(badTime.err).toContain("untimed.jsonl: prompt 0 has no timestamp");
+});
+
+test("a failed retain is counted on its transcript's line; the run goes on and exits 0", async () => {
+	// The last prompt of the fixture is rejected; the two before it still land.
+	failRetain = (content) => content === "Why does the widgets parser build fail?";
+	const calls = retainCalls;
+	const run = await backfill([fixture], { DMN_STORE_URL: server.url, HOME: "/home/test" });
+	failRetain = () => false;
+	expect(run.err).toBe("");
+	expect(run.code).toBe(0);
+	expect(run.out.split("\n").filter(Boolean)).toEqual([
+		`${fixture}: prompts=3 retained=4 failed=1 skipped=0`,
+		"total retained 4",
+	]);
+	// Only successes counted: the failed prompt's turns never reached the store.
+	const texts = (await store.list("generic", { limit: 100, offset: 0 })).map(
+		(record) => record.text,
+	);
+	expect(texts).not.toContain("The build fails because the grammar fixture is stale");
+	// No retry: exactly one retain request per prompt.
+	expect(retainCalls - calls).toBe(3);
+});
+
+test("every retain failing: a failed count per line, total retained 0, one stderr line, exit 1", async () => {
+	failRetain = () => true;
+	const run = await backfill([fixture], { DMN_STORE_URL: server.url, HOME: "/home/test" });
+	expect(run.code).toBe(1);
+	expect(run.out.split("\n").filter(Boolean)).toEqual([
+		`${fixture}: prompts=3 retained=0 failed=3 skipped=0`,
+		"total retained 0",
+	]);
+	expect(run.err).toBe("dmn: backfill: nothing was retained\n");
+	// --dry touches no store, whatever the server would answer: exit 0 and not one retain call.
+	const calls = retainCalls;
+	const dry = await backfill(["--dry", fixture], { DMN_STORE_URL: server.url, HOME: "/home/test" });
+	failRetain = () => false;
+	expect(dry.code).toBe(0);
+	expect(retainCalls).toBe(calls);
 });
 
 test("each transcript path gets its own line and cap, whatever the basenames", async () => {
