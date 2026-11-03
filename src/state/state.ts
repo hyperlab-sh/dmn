@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS use_events (
 	memory_id TEXT NOT NULL,
 	turn_id TEXT NOT NULL,
 	at TEXT NOT NULL,
+	project TEXT NOT NULL DEFAULT '',
 	UNIQUE (memory_id, turn_id)
 );
 CREATE TABLE IF NOT EXISTS dormant (
@@ -50,6 +51,11 @@ CREATE TABLE IF NOT EXISTS tag_fan_cache (
 	at TEXT NOT NULL,
 	PRIMARY KEY (bank, tag)
 );
+CREATE TABLE IF NOT EXISTS promotions (
+	memory_id TEXT PRIMARY KEY,
+	scope TEXT NOT NULL,
+	at TEXT NOT NULL
+);
 `;
 
 /** Use counts, dormancy and the tag fan cache. dmn's own bookkeeping; the store is never patched. */
@@ -68,6 +74,13 @@ export class LocalState {
 		const columns = this.database.query<{ name: string }, []>("PRAGMA table_info(co_use)").all();
 		if (!columns.some((column) => column.name === "last_at")) {
 			this.database.exec("ALTER TABLE co_use ADD COLUMN last_at TEXT NOT NULL DEFAULT ''");
+		}
+		// use_events shipped without project (D29); add it to state files created before.
+		const eventColumns = this.database
+			.query<{ name: string }, []>("PRAGMA table_info(use_events)")
+			.all();
+		if (!eventColumns.some((column) => column.name === "project")) {
+			this.database.exec("ALTER TABLE use_events ADD COLUMN project TEXT NOT NULL DEFAULT ''");
 		}
 	}
 
@@ -89,13 +102,18 @@ export class LocalState {
 		};
 	}
 
-	/** Counts one use per memory per turn; a repeat for the same turn is ignored. */
-	recordUse(memoryId: string, turnId: string): void {
+	/**
+	 * Counts one use per memory per turn, under the project of the session that cited it; a
+	 * repeat for the same turn is ignored.
+	 */
+	recordUse(memoryId: string, turnId: string, project: string): void {
 		const at = this.clock().toISOString();
 		this.database.transaction(() => {
 			const inserted = this.database
-				.query("INSERT OR IGNORE INTO use_events (memory_id, turn_id, at) VALUES (?, ?, ?)")
-				.run(memoryId, turnId, at);
+				.query(
+					"INSERT OR IGNORE INTO use_events (memory_id, turn_id, at, project) VALUES (?, ?, ?, ?)",
+				)
+				.run(memoryId, turnId, at, project);
 			if (inserted.changes === 0) return;
 			this.database
 				.query(
@@ -154,6 +172,16 @@ export class LocalState {
 		return this.associations(memoryId).length;
 	}
 
+	/** The distinct, non-empty projects whose sessions cited `memoryId`, sorted. */
+	projectsUsing(memoryId: string): string[] {
+		return this.database
+			.query<{ project: string }, [string]>(
+				"SELECT DISTINCT project FROM use_events WHERE memory_id = ? AND project <> '' ORDER BY project",
+			)
+			.all(memoryId)
+			.map((row) => row.project);
+	}
+
 	isDormant(memoryId: string): boolean {
 		return this.database.query("SELECT 1 FROM dormant WHERE memory_id = ?").get(memoryId) !== null;
 	}
@@ -167,6 +195,19 @@ export class LocalState {
 	/** The only delete in dmn: removes a dormancy row, never a memory. */
 	revive(memoryId: string): void {
 		this.database.query("DELETE FROM dormant WHERE memory_id = ?").run(memoryId);
+	}
+
+	/** Remembers an applied promotion; a memory with a row is never proposed again. */
+	recordPromotion(memoryId: string, scope: string): void {
+		this.database
+			.query("INSERT OR IGNORE INTO promotions (memory_id, scope, at) VALUES (?, ?, ?)")
+			.run(memoryId, scope, this.clock().toISOString());
+	}
+
+	isPromoted(memoryId: string): boolean {
+		return (
+			this.database.query("SELECT 1 FROM promotions WHERE memory_id = ?").get(memoryId) !== null
+		);
 	}
 
 	/**

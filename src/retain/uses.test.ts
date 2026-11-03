@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LocalState } from "../state/state.js";
-import { extractUses, recordUses } from "./uses.js";
+import { countCitedUses, extractUses, recordUses } from "./uses.js";
 
 let directory: string;
 let state: LocalState;
@@ -25,12 +25,18 @@ test("extractUses returns each cited id once, ignoring look-alikes", () => {
 
 test("a turn counts each cited memory once and a repeat of the turn counts nothing", () => {
 	const cited = extractUses("[m:a1] [m:a1] [m:a1] [m:b2]");
-	recordUses(state, cited, "turn-1");
-	recordUses(state, cited, "turn-1");
+	recordUses(state, cited, "turn-1", "");
+	recordUses(state, cited, "turn-1", "");
 	expect(state.uses("a1").useCount).toBe(1);
 	expect(state.uses("b2").useCount).toBe(1);
 
-	recordUses(state, ["a1"], "turn-2");
+	recordUses(state, ["a1"], "turn-2", "");
 	expect(state.uses("a1").useCount).toBe(2);
 	expect(state.uses("b2").useCount).toBe(1);
+});
+
+test("countCitedUses records the use under the turn's project", async () => {
+	const counted = await countCitedUses(state, "As [m:a1] says.", "turn-p", "widgets");
+	expect(counted).toEqual(["a1"]);
+	expect(state.projectsUsing("a1")).toEqual(["widgets"]);
 });

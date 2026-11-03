@@ -43,4 +43,13 @@ describe.skipIf(!storeUrl)("Hindsight contract (needs DMN_STORE_URL)", () => {
 		expect(await store.recall(unwritten, { query: "x", topK: 1 })).toEqual([]);
 		expect(await store.get(bank, "not-a-uuid")).toBeNull();
 	}, 120_000);
+
+	test("consolidate returns the store's operation id and deduplicated count", async () => {
+		const store = new HindsightStore({ baseUrl: storeUrl ?? "", timeoutMs: 30_000 });
+		const bank = `contract-consolidate-${crypto.randomUUID().slice(0, 8)}`;
+		await store.retain(bank, [{ content: "The deploy pipeline runs migrations first.", tags: [] }]);
+		const result = await store.consolidate(bank);
+		expect(result.operationId).toBeString();
+		expect(result.deduplicated).toBeNumber();
+	}, 120_000);
 });

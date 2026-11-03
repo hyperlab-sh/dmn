@@ -1,4 +1,6 @@
+import { StoreError } from "./hindsight.js";
 import type {
+	ConsolidationResult,
 	ListQuery,
 	MemoryRecord,
 	MemoryStore,
@@ -109,6 +111,14 @@ export class FakeStore implements MemoryStore {
 		return this.banks.has(bank);
 	}
 
+	async consolidate(bank: string): Promise<ConsolidationResult> {
+		if (!this.hasBank(bank)) {
+			// The same error the adapter throws for the server's 404, so callers skip the bank.
+			throw new StoreError(`POST consolidate failed: 404 Bank '${bank}' not found`, 404);
+		}
+		return { operationId: "fake", deduplicated: 0 };
+	}
+
 	async listTags(bank: string): Promise<TagCount[]> {
 		const counts = new Map<string, number>();
 		for (const record of this.banks.get(bank) ?? []) {
@@ -193,6 +203,10 @@ export function startFakeServer(options?: {
 				});
 			}
 			const bankMissing = Response.json({ detail: `Bank '${bank}' not found` }, { status: 404 });
+			if (request.method === "POST" && path === "/consolidate") {
+				if (!store.hasBank(bank)) return bankMissing;
+				return Response.json({ operation_id: "fake", deduplicated: 0 });
+			}
 			if (request.method === "POST" && path === "/memories/recall") {
 				if (!store.hasBank(bank)) return bankMissing;
 				const body = (await request.json()) as RecallBody;
