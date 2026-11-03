@@ -7,10 +7,10 @@ export {
 	retrievalProbability,
 	spreadingActivation,
 } from "./activation/act-r.js";
-export type { Cue, CueInput } from "./cue/cue.js";
-export { buildCue, softTags } from "./cue/cue.js";
 export type { Config, LoadConfigOptions } from "./config/config.js";
 export { ConfigError, createStore, loadConfig, openState } from "./config/config.js";
+export type { Cue, CueInput } from "./cue/cue.js";
+export { buildCue, softTags } from "./cue/cue.js";
 // Type-only: the value pulls in `bun:sqlite`, which Node cannot load. Use `openState`.
 export type { LocalState, LocalStateOptions, MemoryUses } from "./state/state.js";
 export type { HindsightOptions } from "./store/hindsight.js";
