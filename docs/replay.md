@@ -20,7 +20,9 @@ dmn replay ~/.claude/projects/<project>/<session>.jsonl [more.jsonl ...] [--top 
 | `--top <n>`           | List length and the `n` of precision@n. Default 5.                                                                                                                                       |
 
 Each run writes `<out>/run-<timestamp>/report.md`, `judgements.json`, and the texts `replay judge`
-needs: `memories.json` (`{id: text}` of every shown memory) and `prompts.json` (`{number: prompt}`). A run directory that
+needs: `memories.json` (`{id: text}` of every shown memory) and `prompts.json` (`{number: prompt}`). `prompts.json` holds the full text of your prompts, so
+do not share a run directory; a prompt that contains a secret (the patterns `retain` uses) is
+left out of it and is never judged. A run directory that
 already exists is never overwritten (exit 2, checked before the replay starts): your judgements
 are in it, so with a fixed `DMN_NOW` pass another `--out` or remove the directory. The report
 records the run's `top:`, and `replay score` uses it. The harness only reads the store; the one
@@ -63,13 +65,15 @@ dmn replay judge <run-dir> --judge fake  # keyword overlap, offline, for dry run
 - **Cost.** Billed per input token (`usage.input_tokens` in the response); each memory is one
   batch item carrying the prompt and the memory, so a run costs about
   `shown memories x (prompt + memory tokens)`. Requests are batched 64 at a time; 429 and 503 are
-  retried up to five attempts, waiting for `Retry-After`.
+  retried up to five attempts, waiting for `Retry-After`. A memory that holds a secret is not sent.
 - **Threshold.** The default `0.5` is only a start: the service's checkpoints need per-task
   calibration. Probes separate unrelated memories from useful ones cleanly and useful from
-  same-project background only partly. Because the raw probability is stored beside `useful`,
-  recalibrate without new calls: pass `--threshold` to re-run `judge` (it overwrites `useful`
-  only), or read `judge.useful` from `judgements.json` and pick the cut that matches your own
-  labels on a handful of entries.
+  same-project background only partly. The raw probability is stored beside `useful`, and an
+  entry that already has one is not judged again: `--threshold` rewrites `useful` from the stored
+  probabilities with no calls and no cost.
+- **Interrupted runs.** Answers are saved after each prompt. If the service fails part-way (a
+  timeout, an exhausted balance), the command prints `judged N/M` and the error, exits 1, and
+  running it again judges only what is missing.
 - **Older runs.** A run made before this command has no `memories.json`; `judge` exits 2 naming
   the file. Make a new run.
 - **Local model later.** The model behind the service is open weights (ModernBERT-large,
