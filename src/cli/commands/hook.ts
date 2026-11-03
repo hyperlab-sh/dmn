@@ -62,7 +62,15 @@ export async function runHook(
 		}
 		// Nothing to do until the intrusive path lands: no state, no store.
 		if (event.name === "PostToolUse") return 0;
-		const state = await openState(config);
+		const now = env.DMN_NOW ? new Date(env.DMN_NOW) : undefined;
+		if (now && Number.isNaN(now.getTime())) throw new Error("DMN_NOW is not an ISO date");
+		// Under DMN_NOW the use stamps follow the same clock as recall.
+		const state = now
+			? new (await import("../../state/state.js")).LocalState({
+					directory: config.stateDir,
+					clock: () => now,
+				})
+			: await openState(config);
 		try {
 			const output = await handleHookEvent(event, {
 				store: createStore(config),
@@ -71,7 +79,7 @@ export async function runHook(
 				// DMN_SEED is for tests; otherwise a session's noise is stable per session id.
 				random: seededRandom(env.DMN_SEED ?? event.sessionId),
 				// DMN_NOW (ISO date) is for tests, next to DMN_SEED.
-				...(env.DMN_NOW && { now: new Date(env.DMN_NOW) }),
+				...(now && { now }),
 				onWarning: (message) => process.stderr.write(`${message}\n`),
 			});
 			if (output) process.stdout.write(`${JSON.stringify(output)}\n`);

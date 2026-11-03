@@ -11,6 +11,9 @@ const secretPatterns: RegExp[] = [
 	/\bglpat-[A-Za-z0-9_-]{20,}/,
 	/\bnpm_[A-Za-z0-9]{36}\b/,
 	/\bsk-[A-Za-z0-9_-]{16,}/,
+	/\b[rs]k_(?:live|test)_[A-Za-z0-9]{16,}/,
+	/\bBasic\s+[A-Za-z0-9+/=]{16,}/,
+	/\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/,
 	/\bBearer\s+[A-Za-z0-9._~+/=-]{16,}/i,
 	/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/,
 	/\bAIza[0-9A-Za-z_-]{35}\b/,
@@ -25,7 +28,7 @@ const envAssignment =
 	/^\s*(?:export\s+)?[A-Za-z0-9_]*(?:SECRET|TOKEN|KEY|PASSWORD)[A-Za-z0-9_]*\s*=\s*\S/im;
 /** `password: hunter2`, `"api_key": "..."`, `client_secret = ...`: dotenv, YAML and JSON forms. */
 const credentialAssignment =
-	/["']?[A-Za-z0-9_-]*(?:secret|token|password|passwd|api[_-]?key|private[_-]?key)[A-Za-z0-9_-]*["']?\s*[:=]\s*["']?[^\s"',]{6,}/i;
+	/["']?[A-Za-z0-9_-]*(?:secret|token|password|passwd|api[_-]?key|private[_-]?key)[A-Za-z0-9_-]*["']?\s*[:=]\s*["']?(?!(?:string|number|boolean|unknown|any|null|undefined|optional|required)(?![\w.-]))[^\s"',]{6,}/i;
 
 const crossSession = /<channel[\s>]|\bmessage from session\b/i;
 const orchestration =

@@ -5,8 +5,22 @@ import { join } from "node:path";
 import { loadConfig } from "../config/config.js";
 import { LocalState } from "../state/state.js";
 import { FakeStore } from "../store/fake.js";
-import type { MemoryStore } from "../store/types.js";
+import type { RetainItem } from "../store/types.js";
 import { type HookDeps, HookEventError, handleHookEvent, parseHookEvent } from "./claude-code.js";
+
+class SpyStore extends FakeStore {
+	retainOptions: unknown[] = [];
+	override retain(bank: string, items: RetainItem[], options?: { async?: boolean }) {
+		this.retainOptions.push(options);
+		return super.retain(bank, items);
+	}
+}
+
+class UnreachableGetStore extends FakeStore {
+	override async get(): Promise<never> {
+		throw new Error("store down");
+	}
+}
 
 let directory: string;
 let state: LocalState;
@@ -113,17 +127,57 @@ test("stop during a stop-hook continuation does nothing", async () => {
 	const stop = { hook_event_name: "Stop", transcript_path: transcript };
 	await handleHookEvent(event({ ...stop, stop_hook_active: true }), deps);
 	expect(await store.listTags("generic")).toEqual([]);
-	const retained: unknown[] = [];
-	const spy: MemoryStore = {
-		...store,
-		get: (bank, id) => store.get(bank, id),
-		retain: (bank, items, options) => {
-			retained.push(options);
-			return store.retain(bank, items);
-		},
-	} as MemoryStore;
+	const spy = new SpyStore();
 	await handleHookEvent(event(stop), { ...deps, store: spy });
-	expect((await store.listTags("generic")).map(({ tag }) => tag)).toContain("kind:turn");
+	expect((await spy.listTags("generic")).map(({ tag }) => tag)).toContain("kind:turn");
 	// Fact extraction must not hold the hook up.
-	expect(retained).toEqual([{ async: true }]);
+	expect(spy.retainOptions).toEqual([{ async: true }]);
+});
+
+const cite = (name: string, assistant: string): string => {
+	const path = join(directory, name);
+	writeFileSync(
+		path,
+		[
+			{ type: "user", uuid: `u-${name}`, message: { role: "user", content: "What did we say?" } },
+			{ type: "assistant", uuid: `a-${name}`, message: { role: "assistant", content: assistant } },
+		]
+			.map((entry) => JSON.stringify(entry))
+			.join("\n"),
+	);
+	return path;
+};
+
+test("a memory cited three times and another once count once each, however often stop runs", async () => {
+	await store.retain("generic", [
+		{ content: "alpha fact", tags: [] },
+		{ content: "beta fact", tags: [] },
+	]);
+	const all = await store.list("generic", { limit: 50, offset: 0 });
+	const idOf = (text: string) => all.find((memory) => memory.text === text)?.id as string;
+	const [x, y] = [idOf("alpha fact"), idOf("beta fact")] as [string, string];
+	const transcript_path = cite(
+		"cited.jsonl",
+		`[m:${x}] [m:${x}] [m:${x}] and [m:${y}], not [m:nope].`,
+	);
+	for (let run = 0; run < 2; run++) {
+		await handleHookEvent(event({ hook_event_name: "Stop", transcript_path }), deps);
+	}
+	expect(state.uses(x).useCount).toBe(1);
+	expect(state.uses(y).useCount).toBe(1);
+	expect(state.uses("nope").useCount).toBe(0);
+});
+
+test("a store that cannot resolve cited ids costs the uses, not the retention", async () => {
+	const down = new UnreachableGetStore();
+	const warnings: string[] = [];
+	const transcript_path = cite("down.jsonl", "As [m:abc] says.");
+	await handleHookEvent(event({ hook_event_name: "Stop", transcript_path }), {
+		...deps,
+		store: down,
+		onWarning: (message) => warnings.push(message),
+	});
+	expect(state.uses("abc").useCount).toBe(0);
+	expect((await down.listTags("generic")).map(({ tag }) => tag)).toContain("kind:turn");
+	expect(warnings.join("\n")).toContain("cannot resolve cited id abc: store down");
 });
