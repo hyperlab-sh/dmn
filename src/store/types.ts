@@ -36,7 +36,6 @@ export interface RecallQuery {
 
 export interface ListQuery {
 	tags?: string[];
-	tagsMatch?: TagsMatch;
 	limit: number;
 	offset: number;
 }

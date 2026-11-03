@@ -86,9 +86,21 @@ export class FakeStore implements MemoryStore {
 	}
 
 	async list(bank: string, query: ListQuery): Promise<MemoryRecord[]> {
-		return (this.banks.get(bank) ?? [])
-			.filter((record) => matchesTags(record.tags, query.tags ?? [], query.tagsMatch ?? "any"))
-			.slice(query.offset, query.offset + query.limit);
+		return (await this.listPage(bank, query)).items;
+	}
+
+	/** One page plus the filtered total, as Hindsight's list endpoint reports it. */
+	async listPage(
+		bank: string,
+		query: ListQuery,
+	): Promise<{ items: MemoryRecord[]; total: number }> {
+		const filtered = (this.banks.get(bank) ?? []).filter((record) =>
+			matchesTags(record.tags, query.tags ?? [], "any_strict"),
+		);
+		return {
+			items: filtered.slice(query.offset, query.offset + query.limit),
+			total: filtered.length,
+		};
 	}
 
 	async listTags(bank: string): Promise<TagCount[]> {
@@ -129,11 +141,8 @@ function wire(record: MemoryRecord) {
 }
 
 /** Serves the Hindsight endpoints dmn uses on a free localhost port, backed by a `FakeStore`. */
-export function startFakeServer(store: FakeStore = new FakeStore()): {
-	url: string;
-	stop: () => void;
-	store: FakeStore;
-} {
+export function startFakeServer(): { url: string; stop: () => void } {
+	const store = new FakeStore();
 	const server = Bun.serve({
 		port: 0,
 		hostname: "127.0.0.1",
@@ -144,7 +153,6 @@ export function startFakeServer(store: FakeStore = new FakeStore()): {
 			const bank = decodeURIComponent(match[1]);
 			const path = match[2];
 			const tags = url.searchParams.getAll("tags");
-			const tagsMatch = (url.searchParams.get("tags_match") ?? undefined) as TagsMatch | undefined;
 
 			if (request.method === "POST" && path === "/memories") {
 				const body = (await request.json()) as RetainBody;
@@ -177,13 +185,12 @@ export function startFakeServer(store: FakeStore = new FakeStore()): {
 			if (request.method === "GET" && path === "/memories/list") {
 				const limit = Number(url.searchParams.get("limit") ?? 100);
 				const offset = Number(url.searchParams.get("offset") ?? 0);
-				const items = await store.list(bank, {
+				const page = await store.listPage(bank, {
 					limit,
 					offset,
 					...(tags.length > 0 ? { tags } : {}),
-					...(tagsMatch ? { tagsMatch } : {}),
 				});
-				return Response.json({ items: items.map(wire), total: items.length, limit, offset });
+				return Response.json({ items: page.items.map(wire), total: page.total, limit, offset });
 			}
 			if (request.method === "GET" && path === "/tags") {
 				const all = await store.listTags(bank);
@@ -204,5 +211,5 @@ export function startFakeServer(store: FakeStore = new FakeStore()): {
 			return new Response("not found", { status: 404 });
 		},
 	});
-	return { url: `http://127.0.0.1:${server.port}`, stop: () => void server.stop(true), store };
+	return { url: `http://127.0.0.1:${server.port}`, stop: () => void server.stop(true) };
 }

@@ -9,6 +9,8 @@ let root: string;
 let emptyDir: string;
 let partialDir: string;
 let brokenDir: string;
+let badActivationDir: string;
+let unknownActivationDir: string;
 const env = { DMN_STORE_URL: "http://store.test", HOME: "/home/test" };
 
 beforeAll(() => {
@@ -16,7 +18,19 @@ beforeAll(() => {
 	emptyDir = join(root, "empty");
 	partialDir = join(root, "partial");
 	brokenDir = join(root, "broken");
-	for (const dir of [emptyDir, partialDir, brokenDir]) mkdirSync(dir);
+	badActivationDir = join(root, "bad-activation");
+	unknownActivationDir = join(root, "unknown-activation");
+	for (const dir of [emptyDir, partialDir, brokenDir, badActivationDir, unknownActivationDir]) {
+		mkdirSync(dir);
+	}
+	writeFileSync(
+		join(badActivationDir, "config.json"),
+		JSON.stringify({ activation: { decay: "0.5" } }),
+	);
+	writeFileSync(
+		join(unknownActivationDir, "config.json"),
+		JSON.stringify({ activation: { decya: 0.5 } }),
+	);
 	writeFileSync(
 		join(partialDir, "config.json"),
 		JSON.stringify({ topK: 3, organizations: { box: "acme" }, activation: { decay: 0.4 } }),
@@ -39,6 +53,7 @@ test("returns the documented defaults when config.json is absent", () => {
 		organizations: {},
 		replayDir: "/home/test/.local/share/dmn/replay",
 		stateDir: "/home/test/.local/state/dmn",
+		storeTimeoutMs: 2000,
 		activation: { ...defaultActivationParameters },
 	});
 });
@@ -65,6 +80,17 @@ test("throws ConfigError naming DMN_STORE_URL when it is unset", () => {
 	expect(() => loadConfig({ env: {}, configDir: emptyDir })).toThrow(/DMN_STORE_URL/);
 });
 
-test("throws ConfigError for a mistyped value", () => {
+test("throws ConfigError for a malformed DMN_STORE_URL and accepts fake:", () => {
+	const malformed = { ...env, DMN_STORE_URL: "127.0.0.1:8888" };
+	expect(() => loadConfig({ env: malformed, configDir: emptyDir })).toThrow(ConfigError);
+	expect(() => loadConfig({ env: malformed, configDir: emptyDir })).toThrow(/DMN_STORE_URL/);
+	expect(
+		loadConfig({ env: { ...env, DMN_STORE_URL: "fake:" }, configDir: emptyDir }).storeUrl,
+	).toBe("fake:");
+});
+
+test("throws ConfigError for a mistyped value, a mistyped or an unknown activation key", () => {
 	expect(() => loadConfig({ env, configDir: brokenDir })).toThrow(/topK/);
+	expect(() => loadConfig({ env, configDir: badActivationDir })).toThrow(/activation\.decay/);
+	expect(() => loadConfig({ env, configDir: unknownActivationDir })).toThrow(/activation\.decya/);
 });
