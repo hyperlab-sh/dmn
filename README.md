@@ -7,7 +7,8 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **Status: pre-alpha.** There is nothing to install yet. This README describes what dmn is for and
-how it will work; [docs/design.md](docs/design.md) has the reasoning.
+how it will work; [docs/design.md](docs/design.md) has the reasoning. The replay harness that measures it on past sessions is described in
+[docs/replay.md](docs/replay.md).
 
 ## Why
 

@@ -1,0 +1,9 @@
+{"type":"user","cwd":"/home/dev/acme/widgets","timestamp":"2026-06-01T09:00:00.000Z","message":{"role":"user","content":"How do I run the tests for the widgets package?"}}
+{"type":"assistant","cwd":"/home/dev/acme/widgets","timestamp":"2026-06-01T09:00:05.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"package.json"}},{"type":"tool_use","id":"t2","name":"Grep","input":{"pattern":"test"}}]}}
+{"type":"user","cwd":"/home/dev/acme/widgets","timestamp":"2026-06-01T09:00:06.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}
+not json
+{"type":"assistant","cwd":"/home/dev/acme/widgets","timestamp":"2026-06-01T09:00:10.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t3","name":"Edit","input":{"file_path":"parser.ts"}},{"type":"tool_use","id":"t4","name":"Bash","input":{"command":"bun test src/parser"}}]}}
+{"type":"user","cwd":"/home/dev/acme/widgets","timestamp":"2026-06-01T09:01:00.000Z","message":{"role":"user","content":"Fix the failing parser test"}}
+{"type":"user","cwd":"/home/dev/acme/widgets","timestamp":"2026-06-01T09:02:00.000Z","message":{"role":"user","content":"<command-message>code-review</command-message><command-name>/code-review</command-name>"}}
+{"type":"assistant","cwd":"/home/dev/acme/widgets","timestamp":"2026-06-01T09:02:05.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t5","name":"Read","input":{"file_path":"retry.ts"}}]}}
+{"type":"user","cwd":"/home/dev/acme/widgets","timestamp":"2026-06-01T09:03:00.000Z","message":{"role":"user","content":"Review the diff for the retry logic"}}

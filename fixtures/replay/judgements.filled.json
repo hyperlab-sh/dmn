@@ -1,0 +1,122 @@
+[
+	{
+		"prompt": 1,
+		"id": "00000000-0000-4000-8000-000000000001",
+		"order": "store",
+		"useful": true
+	},
+	{
+		"prompt": 1,
+		"id": "00000000-0000-4000-8000-000000000002",
+		"order": "store",
+		"useful": false
+	},
+	{
+		"prompt": 1,
+		"id": "00000000-0000-4000-8000-000000000003",
+		"order": "store",
+		"useful": true
+	},
+	{
+		"prompt": 1,
+		"id": "00000000-0000-4000-8000-000000000004",
+		"order": "store",
+		"useful": false
+	},
+	{
+		"prompt": 1,
+		"id": "00000000-0000-4000-8000-000000000005",
+		"order": "store",
+		"useful": false
+	},
+	{
+		"prompt": 1,
+		"id": "00000000-0000-4000-8000-000000000006",
+		"order": "activation",
+		"useful": true
+	},
+	{
+		"prompt": 1,
+		"id": "00000000-0000-4000-8000-000000000007",
+		"order": "activation",
+		"useful": true
+	},
+	{
+		"prompt": 1,
+		"id": "00000000-0000-4000-8000-000000000008",
+		"order": "activation",
+		"useful": false
+	},
+	{
+		"prompt": 1,
+		"id": "00000000-0000-4000-8000-000000000009",
+		"order": "activation",
+		"useful": true
+	},
+	{
+		"prompt": 1,
+		"id": "00000000-0000-4000-8000-000000000010",
+		"order": "activation",
+		"useful": false
+	},
+	{
+		"prompt": 2,
+		"id": "00000000-0000-4000-8000-000000000001",
+		"order": "store",
+		"useful": true
+	},
+	{
+		"prompt": 2,
+		"id": "00000000-0000-4000-8000-000000000002",
+		"order": "store",
+		"useful": false
+	},
+	{
+		"prompt": 2,
+		"id": "00000000-0000-4000-8000-000000000003",
+		"order": "store",
+		"useful": false
+	},
+	{
+		"prompt": 2,
+		"id": "00000000-0000-4000-8000-000000000004",
+		"order": "store",
+		"useful": false
+	},
+	{
+		"prompt": 2,
+		"id": "00000000-0000-4000-8000-000000000005",
+		"order": "store",
+		"useful": true
+	},
+	{
+		"prompt": 2,
+		"id": "00000000-0000-4000-8000-000000000006",
+		"order": "activation",
+		"useful": false
+	},
+	{
+		"prompt": 2,
+		"id": "00000000-0000-4000-8000-000000000007",
+		"order": "activation",
+		"useful": true
+	},
+	{
+		"prompt": 2,
+		"id": "00000000-0000-4000-8000-000000000008",
+		"order": "activation",
+		"useful": true
+	},
+	{
+		"prompt": 2,
+		"id": "00000000-0000-4000-8000-000000000009",
+		"order": "activation",
+		"useful": true
+	},
+	{
+		"prompt": 2,
+		"id": "00000000-0000-4000-8000-000000000010",
+		"order": "activation",
+		"useful": false
+	}
+]
