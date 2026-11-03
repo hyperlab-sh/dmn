@@ -43,3 +43,18 @@ test("hook post-tool does no work: it never opens the state", () => {
 		rmSync(directory, { recursive: true, force: true });
 	}
 });
+
+test("hook rejects a DMN_NOW that is not a date instead of failing later", () => {
+	const result = Bun.spawnSync(["bun", "src/cli/index.ts", "hook", "stop"], {
+		env: {
+			PATH: process.env.PATH ?? "",
+			DMN_STORE_URL: "fake:",
+			DMN_NOW: "yesterday",
+			HOME: tmpdir(),
+		},
+		cwd: new URL("../..", import.meta.url).pathname,
+		stdin: Buffer.from('{"hook_event_name":"Stop","cwd":"/","session_id":"s"}'),
+	});
+	expect(result.exitCode).toBe(1);
+	expect(result.stderr.toString()).toContain("DMN_NOW");
+});
