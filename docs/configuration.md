@@ -241,4 +241,5 @@ dmn recall --role developer --top 3     # fewer
 `dmn recall --role <r> [--top N]` prints the memories tagged `role:<r>` from the same two banks
 recall uses (the working directory's organization bank and `generic`), one `[m:<id>] <text>`
 line per memory in store order, dormant ids dropped, no activation rerank. `--top` defaults to
-`topK`. An unknown role exits 1 naming the four roles.
+`topK` and caps the printed lines across both banks together. An unknown role exits 1 naming
+the four roles.

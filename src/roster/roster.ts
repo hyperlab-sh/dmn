@@ -70,7 +70,7 @@ export async function syncRoster(
  * The model's first sentence: up to the first `.`, `!` or `?` followed by a space or the end,
  * else the first 200 characters. Whitespace is flattened first, so a line stays one line.
  */
-export function firstSentence(content: string): string {
+function firstSentence(content: string): string {
 	const text = content.replace(/\s+/g, " ").trim();
 	const end = /[.!?]( |$)/.exec(text);
 	if (end) return text.slice(0, end.index + 1);

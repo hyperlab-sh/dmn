@@ -18,6 +18,8 @@ let judgeStates: string[];
 let scratch: string;
 let space: string;
 let emptyDirectory: string;
+/** The roster row's own space, under a second mapped organization. */
+let rosterSpace: string;
 let env: Record<string, string>;
 let ids: Record<string, string>;
 
@@ -126,13 +128,18 @@ beforeAll(async () => {
 	scratch = mkdtempSync(join(tmpdir(), "dmn-hook-"));
 	space = join(scratch, "workspace", "acmeorg", "space");
 	emptyDirectory = join(scratch, "workspace", "elsewhere");
+	// The roster row's own organization, so its models never touch the acme bank the other
+	// rows of this file assert on.
+	rosterSpace = join(scratch, "workspace", "rosterorg", "space");
 	mkdirSync(space, { recursive: true });
 	mkdirSync(emptyDirectory, { recursive: true });
+	mkdirSync(rosterSpace, { recursive: true });
 	writeFileSync(join(space, "HYPER.md"), "");
+	writeFileSync(join(rosterSpace, "HYPER.md"), "");
 	mkdirSync(join(scratch, "config", "dmn"), { recursive: true });
 	writeFileSync(
 		join(scratch, "config", "dmn", "config.json"),
-		JSON.stringify({ organizations: { acmeorg: "acme" } }),
+		JSON.stringify({ organizations: { acmeorg: "acme", rosterorg: "roster" } }),
 	);
 	env = {
 		PATH: process.env.PATH ?? "",
@@ -289,8 +296,8 @@ test("stop records a co-use edge for two cited memories once, and none for one",
 });
 
 test("session start appends one roster line per other role after the memory lines", async () => {
-	// Run last: its models stay out of the earlier session-start runs of this file.
-	await store.retain(bankFor("acme"), [
+	// The row's own organization and bank, so its models touch no other row's assertions.
+	await store.retain(bankFor("roster"), [
 		{
 			content: "The reviewer cites the design doc for every change. It also tracks flaky tests.",
 			tags: ["role:reviewer"],
@@ -298,7 +305,7 @@ test("session start appends one roster line per other role after the memory line
 		{ content: "The developer keeps the build green.", tags: ["role:developer"] },
 	]);
 	for (const role of rosterRoles) {
-		await store.createMentalModel(bankFor("acme"), {
+		await store.createMentalModel(bankFor("roster"), {
 			id: rosterModelId(role),
 			name: rosterModelId(role),
 			sourceQuery: rosterSourceQuery(role),
@@ -320,7 +327,10 @@ test("session start appends one roster line per other role after the memory line
 		}),
 	);
 	const lines = injected(
-		await run("session-start", "session-start.json", { transcript: developerTranscript }),
+		await run("session-start", "session-start.json", {
+			cwd: rosterSpace,
+			transcript: developerTranscript,
+		}),
 	);
 	const roster = lines.filter((line) => line.startsWith("[roster:"));
 	// One line for the reviewer's first sentence; none for the session's own role, none for

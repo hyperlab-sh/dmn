@@ -123,9 +123,10 @@ const judgeWarning = (onWarning: (message: string) => void) => (error: unknown) 
 	onWarning(`dmn: judge: ${(error as Error).message}`);
 
 /**
- * The roster lines of a session start: one per other role whose model the cue's banks hold —
- * the first bank wins when both hold one — within the budget the memory lines left. A store
- * that cannot be read costs the lines, not the injection.
+ * The roster lines of a session start: one per other role whose model the cue's banks hold
+ * something to say about — the first model with content wins, the organization bank first —
+ * within the budget the memory lines left. A store that cannot be read costs the lines, not
+ * the injection.
  */
 async function sessionRosterLines(
 	store: MemoryStore,
@@ -140,7 +141,9 @@ async function sessionRosterLines(
 		const seen = new Set<string>();
 		const models: MentalModel[] = [];
 		for (const model of perBank.flat()) {
-			if (seen.has(model.role)) continue;
+			// A model with nothing to say yet does not shadow another bank's model for the same
+			// role: the first model with content wins, and the organization bank is read first.
+			if (seen.has(model.role) || model.content.trim() === "") continue;
 			seen.add(model.role);
 			models.push(model);
 		}
