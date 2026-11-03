@@ -176,10 +176,12 @@ async function finishTurn(event: HookEvent, deps: HookDeps): Promise<HookOutput>
 		],
 		{
 			now: deps.now ?? new Date(),
-			// One classify call tags the kinds; a judge that fails costs the tags, not the turn.
+			// One classify call tags the kinds; a judge that fails or outlives the store limit
+			// costs the tags, not the turn.
 			...(deps.judge && {
 				judge: deps.judge,
 				kindThreshold: deps.config.judge.kindThreshold,
+				judgeDeadlineMs: deps.config.storeTimeoutMs,
 			}),
 			...(deps.onWarning && { onJudgeError: judgeWarning(deps.onWarning) }),
 		},

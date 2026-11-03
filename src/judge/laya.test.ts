@@ -233,3 +233,52 @@ test("classify batches above 64 texts and trims each state to 1500 characters", 
 	expect(await judge.classify([])).toEqual([]);
 	expect(recorded).toHaveLength(2);
 });
+
+test("a deadline stops the whole call instead of waiting past it", async () => {
+	const sleeps: number[] = [];
+	let clock = 0;
+	const { recorded, fetcher } = fakeFetch([status(429, { "retry-after": "60" })]);
+	const judge = new LayaJudge({
+		apiKey: "k",
+		fetch: fetcher,
+		sleep: async (ms) => {
+			sleeps.push(ms);
+			clock += ms;
+		},
+		random: () => 0.5,
+		now: () => clock,
+		deadlineMs: 1000,
+	});
+	const error = await judge.classify(["a turn"]).catch((thrown) => thrown);
+	expect(error).toBeInstanceOf(JudgeError);
+	expect(error.message).toContain("deadline");
+	// One attempt, no 60-second Retry-After wait: the budget bounds retries and waits too.
+	expect(recorded).toHaveLength(1);
+	expect(sleeps).toEqual([]);
+});
+
+test("a deadline splits across batches: the last batch inherits the spent budget", async () => {
+	const sleeps: number[] = [];
+	let clock = 0;
+	// 65 texts force a second batch; both batches answer 429 with a long Retry-After.
+	const { recorded, fetcher } = fakeFetch([status(429, { "retry-after": "90" })]);
+	const judge = new LayaJudge({
+		apiKey: "k",
+		fetch: fetcher,
+		sleep: async (ms) => {
+			sleeps.push(ms);
+			clock += ms;
+		},
+		random: () => 0,
+		now: () => clock,
+		deadlineMs: 5000,
+	});
+	const texts = Array.from({ length: 65 }, (_, index) => `text ${index}`);
+	const error = await judge.classify(texts).catch((thrown) => thrown);
+	expect(error).toBeInstanceOf(JudgeError);
+	expect(error.message).toContain("deadline");
+	// Only the first batch was attempted; the second never started, and nothing slept.
+	expect(recorded).toHaveLength(1);
+	expect(recorded[0]?.body.requests).toHaveLength(64);
+	expect(sleeps).toEqual([]);
+});

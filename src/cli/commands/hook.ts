@@ -33,7 +33,8 @@ async function readStdin(): Promise<string> {
  * thought (none when intrusive thoughts are off). A ConfigError building it (provider `laya`
  * without `LAYA_API_KEY`) is C-3's exit for the prompt events, but Stop swallows it as a
  * warning — a missing key must not cost a turn its retention. The judge's timeout is capped at
- * the hook's own limit (a tool call's thought has `intrusionTimeoutMs`, the rest `storeTimeoutMs`).
+ * the hook's own limit (a tool call's thought has `intrusionTimeoutMs`, the rest `storeTimeoutMs`),
+ * and that limit is also the whole call's deadline: a 429 storm cannot outlive the hook.
  */
 export function hookJudge(
 	event: HookEventName,
@@ -49,6 +50,8 @@ export function hookJudge(
 		return createJudge(
 			{ ...config, judge: { ...config.judge, timeoutMs: Math.min(config.judge.timeoutMs, limit) } },
 			env,
+			// Per call, not per attempt: the retries and their waits share the same budget.
+			{ deadlineMs: limit },
 		);
 	} catch (error) {
 		if (event === "Stop" && error instanceof ConfigError) {
