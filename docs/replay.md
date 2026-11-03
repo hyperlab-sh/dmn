@@ -153,8 +153,10 @@ time, exactly as they would have.
   after `top:`; `dmn replay score` reads `top:` as before and ignores the rest. Judging and
   scoring work on the run exactly as on a plain one.
 
-With `--store fake` the walk runs against an in-process store you can seed with `--memories`;
-the local state is still a scratch directory, deleted afterwards. For reproducibility set
+With `--store fake` an as-live run starts from an empty in-process store — the walk builds
+the store itself, and seeding the dated fixture memories would recall later content at
+earlier prompts; pass `--memories <json>` to start from a chosen set anyway. The local state
+is still a scratch directory, deleted afterwards. For reproducibility set
 `DMN_SEED` and `DMN_NOW` as usual: `DMN_NOW` names the run directory only — every recorded
 age, use and dormancy decision inside the walk comes from the prompts' own timestamps.
 

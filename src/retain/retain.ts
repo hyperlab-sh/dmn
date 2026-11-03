@@ -17,6 +17,12 @@ export type RetainResult = {
 export interface RetainTurnsOptions {
 	now: Date;
 	/**
+	 * Whether the store may answer before it has fully indexed the items: the Stop hook's
+	 * default (fact extraction can take seconds), while a replayed or backfilled retain passes
+	 * false so the next step sees the turns. Default true.
+	 */
+	async?: boolean;
+	/**
 	 * Classifies the retained texts into kinds; without one, or on any judge failure, every turn
 	 * keeps `kind:turn`. Receives text only, and only what passed `shouldRetain`.
 	 */
@@ -56,6 +62,7 @@ export async function retainTurns(
 	turns: ReadonlyArray<Turn & { documentId?: string }>,
 	{
 		now,
+		async = true,
 		judge,
 		kindThreshold = 0.5,
 		judgeDeadlineMs,
@@ -109,7 +116,7 @@ export async function retainTurns(
 		// A repeated stop for the same turn replaces the document instead of duplicating it.
 		...(turn.documentId !== undefined && { documentId: `${turn.documentId}:${turn.role}` }),
 	}));
-	// Fact extraction can take seconds; a hook must not wait for it.
-	if (items.length > 0) await store.retain(bankFor(cue.organization), items, { async: true });
+	// Fact extraction can take seconds; a hook must not wait for it, a replayed walk must.
+	if (items.length > 0) await store.retain(bankFor(cue.organization), items, { async });
 	return { retained: items.length, skipped };
 }

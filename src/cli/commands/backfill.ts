@@ -68,25 +68,20 @@ export async function runBackfill(
 		const ordered = orderPrompts(files);
 		const config = dry ? loadConfig({ env, requireStore: false }) : loadConfig({ env });
 		const store: MemoryStore = dry ? new FakeStore() : createStore(config);
-		// The basename namespaces the retained documents; the given path names the output line.
-		const tally = new Map<string, TranscriptTally>();
-		const tallyOf = (prompt: { file: string }) => {
-			let current = tally.get(prompt.file);
-			if (!current) {
-				const path = files.find((file) => file.endsWith(prompt.file)) ?? prompt.file;
-				current = { path, prompts: 0, retained: 0, skipped: new Map() };
-				tally.set(prompt.file, current);
-			}
-			return current;
-		};
+		// One line and one --max-turns count per given path: basenames may collide across
+		// directories, and a transcript that holds no prompt still gets its line.
+		const tally = new Map<string, TranscriptTally>(
+			files.map((path) => [path, { path, prompts: 0, retained: 0, skipped: new Map() }]),
+		);
 		const taken = new Map<string, number>();
 		let totalRetained = 0;
 		for (const prompt of ordered) {
-			const seen = taken.get(prompt.file) ?? 0;
+			const seen = taken.get(prompt.path) ?? 0;
 			// At most --max-turns prompts per transcript; the rest are history left alone.
 			if (seen >= maxTurns) continue;
-			taken.set(prompt.file, seen + 1);
-			const current = tallyOf(prompt);
+			taken.set(prompt.path, seen + 1);
+			const current = tally.get(prompt.path);
+			if (!current) continue;
 			current.prompts += 1;
 			const cue = buildCue({
 				cwd: prompt.cwd,

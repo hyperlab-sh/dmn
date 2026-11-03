@@ -59,19 +59,42 @@ beforeAll(() => {
 });
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-/** Calls the command in-process, capturing what it writes to stderr (no spawn needed). */
-async function inProcess(args: string[]): Promise<{ code: number; stderr: string }> {
-	const original = process.stderr.write.bind(process.stderr);
+/** Calls the command in-process, capturing what it writes to stdout and stderr (no spawn). */
+async function inProcess(
+	args: string[],
+	env: Record<string, string> = {},
+): Promise<{ code: number; stdout: string; stderr: string }> {
+	const touched = ["DMN_NOW", "DMN_SEED", "XDG_CONFIG_HOME", ...Object.keys(env)];
+	const originals = Object.fromEntries(touched.map((key) => [key, process.env[key]]));
+	// The same environment the spawned cases get: a fixed clock and seed, a private config dir.
+	process.env.DMN_NOW = "2026-06-03T00:00:00Z";
+	process.env.DMN_SEED = "7";
+	process.env.XDG_CONFIG_HOME = join(scratch, "config");
+	Object.assign(process.env, env);
+	const originalOut = process.stdout.write.bind(process.stdout);
+	const originalErr = process.stderr.write.bind(process.stderr);
+	let stdout = "";
 	let stderr = "";
-	process.stderr.write = ((chunk: string | Uint8Array) => {
+	const writeOut = ((chunk: string | Uint8Array) => {
+		stdout += chunk;
+		return true;
+	}) as typeof process.stdout.write;
+	const writeErr = ((chunk: string | Uint8Array) => {
 		stderr += chunk;
 		return true;
 	}) as typeof process.stderr.write;
+	process.stdout.write = writeOut;
+	process.stderr.write = writeErr;
 	try {
 		const code = await runReplayCommand(args);
-		return { code, stderr };
+		return { code, stdout, stderr };
 	} finally {
-		process.stderr.write = original;
+		process.stdout.write = originalOut;
+		process.stderr.write = originalErr;
+		for (const key of touched) {
+			if (originals[key] === undefined) delete process.env[key];
+			else process.env[key] = originals[key];
+		}
 	}
 }
 
@@ -120,6 +143,29 @@ test("--as-live exits 2 naming the file and index of a prompt without a timestam
 	expect(code).toBe(2);
 	// The file and the prompt's index, before anything is retained.
 	expect(stderr).toContain("untimed.jsonl: prompt 0 has no timestamp");
+});
+
+test("--as-live --store fake starts from an empty store, not the seeded fixtures", async () => {
+	const out = join(scratch, "as-live-out");
+	const { code, stderr } = await inProcess([
+		"--as-live",
+		"--judge",
+		"fake",
+		"--store",
+		"fake",
+		"--out",
+		out,
+		join(root, "fixtures/replay/live-a.jsonl"),
+		join(root, "fixtures/replay/live-b.jsonl"),
+	]);
+	expect(stderr).toBe("");
+	expect(code).toBe(0);
+	const report = readFileSync(join(out, "run-2026-06-03T00-00-00-000Z", "report.md"), "utf8");
+	// The walk builds the store itself: nothing from fixtures/replay/memories.json is recalled.
+	expect(report).not.toContain("Run the full test suite");
+	// The first prompt of the day lists nothing at all — the store was empty when it ran.
+	const first = report.slice(report.indexOf("### Prompt 1"), report.indexOf("### Prompt 2"));
+	expect(first).toContain("store:\n\nactivation:\n");
 });
 
 test("replay writes the report and judgements, then score fills the summary", () => {

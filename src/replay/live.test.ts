@@ -48,8 +48,16 @@ const retainedAt = new Map<string, number>([
 let scratch: string;
 const states: LocalState[] = [];
 
-beforeAll(() => {
+// Parsed once: every walk below runs over the same ordered prompts.
+const prompts = orderPrompts([fixture("live-a.jsonl"), fixture("live-b.jsonl")]);
+// The two walks two tests each read: built once, reused (same inputs, same answers).
+let noneWalk: Walk;
+let judgedWalk: Walk;
+
+beforeAll(async () => {
 	scratch = mkdtempSync(join(tmpdir(), "dmn-live-test-"));
+	noneWalk = await walk({ uses: "none" });
+	judgedWalk = await walk({ uses: "judged" });
 });
 afterAll(() => {
 	for (const state of states) state.close();
@@ -89,7 +97,6 @@ async function walk(options: { uses: "judged" | "none"; measureFrom?: Date }): P
 	});
 	states.push(state);
 	const store = new FakeStore(() => clockNow);
-	const prompts = orderPrompts([fixture("live-a.jsonl"), fixture("live-b.jsonl")]);
 	const result = await runReplay({
 		prompts,
 		store,
@@ -123,7 +130,7 @@ async function walk(options: { uses: "judged" | "none"; measureFrom?: Date }): P
 }
 
 test("prompts walk interleaved in timestamp order; recall sees only what was retained before", async () => {
-	const { entries } = await walk({ uses: "none" });
+	const { entries } = noneWalk;
 	expect(entries.map((entry) => entry.prompt.text)).toEqual([
 		texts.a0u,
 		texts.b0u,
@@ -151,7 +158,7 @@ test("prompts walk interleaved in timestamp order; recall sees only what was ret
 });
 
 test("a judged-useful memory is used at the prompt's time, and its pairs gain co-use", async () => {
-	const { uses, associations, idOf } = await walk({ uses: "judged" });
+	const { uses, associations, idOf } = judgedWalk;
 	// The fake judge called the b0 answer useful exactly once, at the a1 prompt.
 	expect(uses(texts.b0a)).toEqual({
 		useCount: 1,
@@ -191,7 +198,7 @@ test("prompts before --measure-from seed the store and are never measured", asyn
 });
 
 test("the sweep runs on the replayed day change: an unused day-1 memory is dormant by day 60", async () => {
-	const { entries, isDormant } = await walk({ uses: "judged" });
+	const { entries, isDormant } = judgedWalk;
 	// Retained on day 1, never judged useful: dormant under the default floor.
 	expect(isDormant(texts.a1a)).toBe(true);
 	// A used one from the same day survives.
