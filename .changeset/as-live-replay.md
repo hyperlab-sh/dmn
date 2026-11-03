@@ -1,5 +1,0 @@
----
-"@hyperlab.sh/dmn": minor
----
-
-As-live replay and backfill. `dmn replay --as-live` replays time instead of reading a store seeded in one go: the prompts of every transcript walk in timestamp order with the clock set to each prompt's own time, so recall at a prompt sees only what was retained before it; after a prompt is reported its turns are retained with that timestamp (the same call the Stop hook makes), the sweep runs whenever the replayed calendar day changes, and `--uses judged` (the default, needs `--judge`) counts a shown memory the judge calls useful as used — use events and co-use edges under the replayed clock. `--measure-from <iso>` retains-only the prompts before it, so one run seeds from older sessions and measures newer ones. `dmn backfill <transcripts...> [--max-turns <n>] [--dry]` is the seeding alone, for installing dmn with a history; every retained turn now carries its content time (`RetainItem.timestamp` on the wire, a record's `createdAt`), never the ingest time.
