@@ -126,6 +126,8 @@ test("stop retains both turns with the cue's tags and counts no uncited or unkno
 		);
 	}
 	expect(turns.map((turn) => turn.metadata?.speaker).sort()).toEqual(["assistant", "user"]);
+	// DMN_NOW reaches the hook as its clock.
+	for (const turn of turns) expect(turn.metadata?.retained_at).toBe("2100-01-01T00:00:00.000Z");
 	expect(turns.map((turn) => turn.text).join("\n")).toContain("Add jitter to the retry delay");
 
 	const state = new LocalState({ directory: join(scratch, "state", "dmn") });
