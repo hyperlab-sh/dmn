@@ -39,8 +39,9 @@ cmd_start() {
 		return
 	fi
 	collect_env_flags
-	# Opt-in: mount a claude config directory (see docs/hindsight.md for the exposure).
-	# The default route is a `claude setup-token` token in HINDSIGHT_API_LLM_API_KEY.
+	# Mount a claude config directory when HINDSIGHT_CLAUDE_DIR is set (the documented default
+	# for a developer machine; see docs/hindsight.md for the exposure). The alternative is a
+	# `claude setup-token` token in HINDSIGHT_API_LLM_API_KEY, which mounts nothing.
 	mount_flags=()
 	if [ -n "${HINDSIGHT_CLAUDE_DIR:-}" ]; then
 		mount_flags=(-v "${HINDSIGHT_CLAUDE_DIR}:/home/hindsight/.claude")
