@@ -70,9 +70,8 @@ Notes for `claude-code`:
   `HINDSIGHT_API_LLM_TIMEOUT` as shown above.
 - **Warning: `HINDSIGHT_CLAUDE_DIR`.** Mounting your `~/.claude` exposes every session
   transcript (which can hold secrets), `settings.json` hooks, `CLAUDE.md` and MCP config to the
-  container, and the container's `claude` writes its own sessions into your host
-  `~/.claude/projects`, the corpus the replay harness reads. Prefer the token. If you mount, use a
-  dedicated directory that holds only a copied credential.
+  container, read-write. Prefer the token. If you mount, use a dedicated directory that holds
+  only a copied credential.
 - Use a model id your account can access. A wrong id fails retain with "issue with the selected
   model".
 
