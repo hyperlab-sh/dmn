@@ -52,10 +52,10 @@ export class LocalState {
 	private readonly database: Database;
 	private readonly clock: () => Date;
 
-	constructor(options: LocalStateOptions) {
-		mkdirSync(options.directory, { recursive: true });
-		this.clock = options.clock ?? (() => new Date());
-		this.database = new Database(join(options.directory, "state.sqlite"), { create: true });
+	constructor({ directory, clock = () => new Date() }: LocalStateOptions) {
+		mkdirSync(directory, { recursive: true });
+		this.clock = clock;
+		this.database = new Database(join(directory, "state.sqlite"), { create: true });
 		this.database.exec("PRAGMA journal_mode = WAL");
 		this.database.exec(schema);
 	}
