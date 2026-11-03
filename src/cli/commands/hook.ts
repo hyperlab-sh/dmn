@@ -27,14 +27,6 @@ async function readStdin(): Promise<string> {
 	return Buffer.concat(chunks).toString("utf8");
 }
 
-function judgeDep(
-	config: ReturnType<typeof loadConfig>,
-	env: Record<string, string | undefined>,
-): { judge?: Judge } {
-	const judge = createJudge(config, env);
-	return judge ? { judge } : {};
-}
-
 /** Runs `dmn hook <subcommand>`; returns the exit code. Output is the hook JSON, or nothing. */
 export async function runHook(
 	subcommand: string | undefined,
@@ -48,8 +40,24 @@ export async function runHook(
 		return 1;
 	}
 	let config: ReturnType<typeof loadConfig>;
+	let judge: Judge | undefined;
 	try {
 		config = loadConfig({ env });
+		// A missing key is a config error (exit 2 for user-prompt). Stop never judges, so it cannot
+		// lose a turn's retention to the judge; a tool call's thought has intrusionTimeoutMs.
+		if (
+			expected !== "Stop" &&
+			!(expected === "PostToolUse" && config.intrusionThreshold === null)
+		) {
+			const limit = expected === "PostToolUse" ? config.intrusionTimeoutMs : config.storeTimeoutMs;
+			judge = createJudge(
+				{
+					...config,
+					judge: { ...config.judge, timeoutMs: Math.min(config.judge.timeoutMs, limit) },
+				},
+				env,
+			);
+		}
 	} catch (error) {
 		if (error instanceof ConfigError) {
 			process.stderr.write(`dmn: ${error.message}\n`);
@@ -83,7 +91,7 @@ export async function runHook(
 				state,
 				config,
 				// Provider "none" builds no judge, so no code path can reach the network.
-				...judgeDep(config, env),
+				...(judge && { judge }),
 				// DMN_SEED is for tests; otherwise a session's noise is stable per session id.
 				random: seededRandom(seed),
 				// Each tool call draws on its own: a fresh process would replay the session's draws.

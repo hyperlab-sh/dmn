@@ -3,7 +3,7 @@ import type { Judge, JudgeMemory, Judgement } from "./types.js";
 const words = (text: string): Set<string> =>
 	new Set(text.toLowerCase().match(/[a-z0-9]{3,}/g) ?? []);
 
-export interface FakeJudgeOptions {
+interface FakeJudgeOptions {
 	/** Ids the judge leaves unanswered, like an item the service refused. */
 	skip?: Iterable<string>;
 	/** Fixed probability per id, in place of the word overlap. */

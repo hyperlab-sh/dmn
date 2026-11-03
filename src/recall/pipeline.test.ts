@@ -46,6 +46,10 @@ beforeAll(async () => {
 		await fake.retain(bank, [{ content: `memory in ${bank}`, tags: ["project:web"] }]);
 	}
 	await fake.retain("generic", [{ content: "memory dormant in generic", tags: ["project:web"] }]);
+	await fake.retain("generic", [
+		{ content: "memory in extra one", tags: ["project:web"] },
+		{ content: "memory in extra two", tags: ["project:web"] },
+	]);
 });
 
 afterAll(() => {
@@ -109,10 +113,6 @@ const gated = (extra: object) =>
 	});
 
 test("the judge gate keeps what scores at or above the threshold, in activation order, and keeps an unanswered one", async () => {
-	await fake.retain("generic", [
-		{ content: "memory in extra one", tags: ["project:web"] },
-		{ content: "memory in extra two", tags: ["project:web"] },
-	]);
 	const plain = await gated({});
 	expect(plain.length).toBeGreaterThanOrEqual(4);
 	const [first, second, third, fourth] = plain.map((memory) => memory.id) as [
