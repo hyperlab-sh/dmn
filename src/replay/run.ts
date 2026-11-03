@@ -64,6 +64,11 @@ async function storeOrder(
 	return merged.sort((a, b) => (b.score?.final ?? 0) - (a.score?.final ?? 0));
 }
 
+/** Directory name of the run made at `now`. */
+export function runName(now: Date): string {
+	return `run-${now.toISOString().replace(/[:.]/g, "-")}`;
+}
+
 /** Runs every prompt through recall twice: in the store's order and in activation order. Read-only. */
 export async function runReplay({
 	prompts,
@@ -114,7 +119,7 @@ export async function runReplay({
 			activation: ranked.slice(0, top),
 		});
 	}
-	return { run: `run-${now.toISOString().replace(/[:.]/g, "-")}`, top, entries, warnings };
+	return { run: runName(now), top, entries, warnings };
 }
 
 export interface SeedMemory {
