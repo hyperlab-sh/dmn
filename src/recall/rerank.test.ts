@@ -29,7 +29,6 @@ const stateWith = (
 		edges.flatMap(([a, b, weight]) =>
 			a === id ? [{ id: b, weight }] : b === id ? [{ id: a, weight }] : [],
 		),
-	associationFan: (id: string) => edges.filter(([a, b]) => a === id || b === id).length,
 	uses: (id: string): MemoryUses => ({
 		useCount: counts[id] ?? 0,
 		firstSeenAt: firstSeen[id] ?? null,

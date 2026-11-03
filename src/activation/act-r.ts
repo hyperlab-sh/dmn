@@ -36,6 +36,9 @@ export const defaultActivationParameters: Readonly<ActivationParameters> = {
 	associationWeight: 0.5,
 };
 
+/** Activation above which a memory counts as retrieved at prompt time; mirrors the config default. */
+export const defaultPromptThreshold = -0.5;
+
 /**
  * Base-level activation using the optimized-learning approximation:
  *
