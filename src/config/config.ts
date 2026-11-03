@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { type ActivationParameters, defaultActivationParameters } from "../activation/act-r.js";
+import { LayaJudge } from "../judge/laya.js";
+import type { Judge } from "../judge/types.js";
 import type { LocalState } from "../state/state.js";
 import { FakeStore } from "../store/fake.js";
 import { HindsightStore } from "../store/hindsight.js";
@@ -12,6 +14,16 @@ export class ConfigError extends Error {
 		super(message);
 		this.name = "ConfigError";
 	}
+}
+
+export interface JudgeConfig {
+	provider: "none" | "laya";
+	/** `useful` in `replay judge` when P(useful) is at least this. */
+	threshold: number;
+	/** Bar for the intrusive path, read by the judge gate. */
+	intrusionThreshold: number;
+	baseUrl?: string;
+	timeoutMs: number;
 }
 
 export interface Config {
@@ -33,6 +45,7 @@ export interface Config {
 	retainTimeoutMs: number;
 	fanCacheSeconds: number;
 	activation: ActivationParameters;
+	judge: JudgeConfig;
 }
 
 export interface LoadConfigOptions {
@@ -116,6 +129,7 @@ export function loadConfig(options: LoadConfigOptions): Config {
 		retainTimeoutMs: 60_000,
 		fanCacheSeconds: 300,
 		activation: { ...defaultActivationParameters },
+		judge: { provider: "none", threshold: 0.5, intrusionThreshold: 0.7, timeoutMs: 5000 },
 	};
 
 	for (const key of numberKeys) {
@@ -172,7 +186,69 @@ export function loadConfig(options: LoadConfigOptions): Config {
 			config.activation[key as keyof ActivationParameters] = value;
 		}
 	}
+	if (file.judge !== undefined) config.judge = readJudge(file.judge, config.judge);
 	return config;
+}
+
+function readJudge(value: unknown, defaults: JudgeConfig): JudgeConfig {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		throw new ConfigError('config.json: "judge" must be an object');
+	}
+	const judge: JudgeConfig = { ...defaults };
+	for (const [key, entry] of Object.entries(value)) {
+		switch (key) {
+			case "provider":
+				if (entry !== "none" && entry !== "laya") {
+					throw new ConfigError('config.json: "judge.provider" must be "none" or "laya"');
+				}
+				judge.provider = entry;
+				break;
+			case "threshold":
+			case "intrusionThreshold":
+				if (typeof entry !== "number" || !(entry >= 0 && entry <= 1)) {
+					throw new ConfigError(`config.json: "judge.${key}" must be a number from 0 to 1`);
+				}
+				judge[key] = entry;
+				break;
+			case "timeoutMs":
+				if (typeof entry !== "number" || !(entry > 0) || !Number.isFinite(entry)) {
+					throw new ConfigError('config.json: "judge.timeoutMs" must be a positive number');
+				}
+				judge.timeoutMs = entry;
+				break;
+			case "baseUrl":
+				if (typeof entry !== "string" || !isHttpUrl(entry)) {
+					throw new ConfigError('config.json: "judge.baseUrl" must be an http(s) URL');
+				}
+				judge.baseUrl = entry;
+				break;
+			default:
+				throw new ConfigError(`config.json: unknown key "judge.${key}"`);
+		}
+	}
+	return judge;
+}
+
+/**
+ * The configured judge, or undefined for provider `none`. The key comes from the environment
+ * only and has no default.
+ */
+export function createJudge(
+	config: Config,
+	env: Record<string, string | undefined>,
+): Judge | undefined {
+	if (config.judge.provider === "none") return undefined;
+	const apiKey = env.LAYA_API_KEY;
+	if (!apiKey) {
+		throw new ConfigError(
+			'LAYA_API_KEY is not set; export it to use judge provider "laya" (the key is read from the environment only)',
+		);
+	}
+	return new LayaJudge({
+		apiKey,
+		timeoutMs: config.judge.timeoutMs,
+		...(config.judge.baseUrl && { baseUrl: config.judge.baseUrl }),
+	});
 }
 
 /**

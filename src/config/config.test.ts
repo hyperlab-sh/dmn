@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultActivationParameters } from "../activation/act-r.js";
-import { ConfigError, loadConfig } from "./config.js";
+import { ConfigError, createJudge, loadConfig } from "./config.js";
 
 let root: string;
 let emptyDir: string;
@@ -58,6 +58,7 @@ test("returns the documented defaults when config.json is absent", () => {
 		retainTimeoutMs: 60_000,
 		fanCacheSeconds: 300,
 		activation: { ...defaultActivationParameters },
+		judge: { provider: "none", threshold: 0.5, intrusionThreshold: 0.7, timeoutMs: 5000 },
 	});
 });
 
@@ -108,4 +109,32 @@ test("intrusionThreshold accepts null to turn intrusive thoughts off, and reject
 	expect(load(null).intrusionThreshold).toBeNull();
 	expect(load(1.5).intrusionThreshold).toBe(1.5);
 	expect(() => load("high")).toThrow(ConfigError);
+});
+
+test("judge block merges over its defaults and rejects bad values", () => {
+	const load = (judge: unknown) => {
+		const dir = join(root, `judge-${JSON.stringify(judge)}`.replace(/\W/g, "_"));
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "config.json"), JSON.stringify({ judge }));
+		return loadConfig({ env, configDir: dir }).judge;
+	};
+	expect(load({ provider: "laya", threshold: 0.3, baseUrl: "http://localhost:9000" })).toEqual({
+		provider: "laya",
+		threshold: 0.3,
+		intrusionThreshold: 0.7,
+		timeoutMs: 5000,
+		baseUrl: "http://localhost:9000",
+	});
+	expect(() => load({ provider: "openai" })).toThrow(/judge\.provider/);
+	expect(() => load({ threshold: 2 })).toThrow(/judge\.threshold/);
+	expect(() => load({ apiKey: "x" })).toThrow(/judge\.apiKey/);
+});
+
+test("createJudge: none gives no judge, laya needs LAYA_API_KEY", () => {
+	const base = loadConfig({ env, configDir: emptyDir });
+	const laya = { ...base, judge: { ...base.judge, provider: "laya" as const } };
+	expect(createJudge(base, {})).toBeUndefined();
+	expect(() => createJudge(laya, {})).toThrow(ConfigError);
+	expect(() => createJudge(laya, {})).toThrow(/^LAYA_API_KEY is not set; /);
+	expect(createJudge(laya, { LAYA_API_KEY: "k" })).toBeDefined();
 });
