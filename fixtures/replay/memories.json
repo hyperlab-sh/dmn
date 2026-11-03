@@ -1,0 +1,98 @@
+[
+	{
+		"bank": "generic",
+		"tags": [],
+		"text": "Run the full test suite before pushing; tests live next to sources",
+		"createdAt": "2026-01-10T00:00:00Z"
+	},
+	{
+		"bank": "generic",
+		"tags": [],
+		"text": "Prefer small commits with conventional messages",
+		"createdAt": "2025-12-01T00:00:00Z"
+	},
+	{
+		"bank": "generic",
+		"tags": [],
+		"text": "The parser rejects trailing commas; fix tests when changing the grammar",
+		"createdAt": "2026-05-20T00:00:00Z"
+	},
+	{
+		"bank": "generic",
+		"tags": [],
+		"text": "Retry logic must back off exponentially and cap the delay",
+		"createdAt": "2026-02-14T00:00:00Z"
+	},
+	{
+		"bank": "generic",
+		"tags": ["task:test", "role:developer"],
+		"text": "A failing parser test usually means a stale fixture; regenerate fixtures first",
+		"createdAt": "2026-05-28T00:00:00Z"
+	},
+	{
+		"bank": "generic",
+		"tags": ["task:test"],
+		"text": "Run only the affected tests while iterating; the full suite runs in CI",
+		"createdAt": "2026-04-02T00:00:00Z"
+	},
+	{
+		"bank": "generic",
+		"tags": ["task:edit", "role:developer"],
+		"text": "Keep edits to the retry module behind the existing interface",
+		"createdAt": "2026-03-03T00:00:00Z"
+	},
+	{
+		"bank": "generic",
+		"tags": ["role:developer"],
+		"text": "Biome formats with tabs and 100 columns",
+		"createdAt": "2026-05-10T00:00:00Z"
+	},
+	{
+		"bank": "generic",
+		"tags": ["task:review", "role:reviewer"],
+		"text": "Review the diff for retry logic: check backoff caps and idempotency",
+		"createdAt": "2026-05-30T00:00:00Z"
+	},
+	{
+		"bank": "generic",
+		"tags": ["role:reviewer"],
+		"text": "Reviewers check that every fix ships with a test",
+		"createdAt": "2026-01-20T00:00:00Z"
+	},
+	{
+		"bank": "generic",
+		"tags": ["task:review"],
+		"text": "Review comments should quote the line they refer to",
+		"createdAt": "2025-11-05T00:00:00Z"
+	},
+	{
+		"bank": "generic",
+		"tags": ["task:plan", "role:architect"],
+		"text": "Plans list out-of-scope items before any code",
+		"createdAt": "2026-05-25T00:00:00Z"
+	},
+	{
+		"bank": "generic",
+		"tags": ["role:architect"],
+		"text": "Architecture decisions are recorded with their reasons",
+		"createdAt": "2026-02-28T00:00:00Z"
+	},
+	{
+		"bank": "generic",
+		"tags": ["task:plan"],
+		"text": "Split plans into units that can land separately",
+		"createdAt": "2026-04-20T00:00:00Z"
+	},
+	{
+		"bank": "generic",
+		"tags": ["task:read"],
+		"text": "Read the module's tests before changing it",
+		"createdAt": "2026-05-15T00:00:00Z"
+	},
+	{
+		"bank": "generic",
+		"tags": ["stack:typescript"],
+		"text": "Use bun test for TypeScript packages",
+		"createdAt": "2026-03-20T00:00:00Z"
+	}
+]

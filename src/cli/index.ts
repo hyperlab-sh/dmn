@@ -23,6 +23,9 @@ switch (command) {
 	case "-h":
 		process.stdout.write(usage);
 		break;
+	case "replay":
+		process.exitCode = await (await import("./commands/replay.js")).run(process.argv.slice(3));
+		break;
 	case "hook":
 		try {
 			loadConfig({ env: process.env });
