@@ -6,7 +6,7 @@ import { loadConfig } from "../config/config.js";
 import { FakeJudge } from "../judge/fake.js";
 import { LocalState } from "../state/state.js";
 import { FakeStore } from "../store/fake.js";
-import type { MemoryRecord } from "../store/types.js";
+import type { MemoryRecord, RetainItem } from "../store/types.js";
 import { orderPrompts } from "./live.js";
 import { runReplay } from "./run.js";
 
@@ -44,6 +44,25 @@ const retainedAt = new Map<string, number>([
 	[texts.b1u, 4],
 	[texts.b1a, 4],
 ]);
+
+/** A store that rejects the retain of one chosen prompt's turns and counts every call. */
+class FlakyStore extends FakeStore {
+	retainCalls = 0;
+	private readonly failDocument: string;
+
+	constructor(clock: () => Date, failDocument: string) {
+		super(clock);
+		this.failDocument = failDocument;
+	}
+
+	async retain(bank: string, items: RetainItem[]): Promise<void> {
+		this.retainCalls += 1;
+		if (items.some((item) => item.documentId === this.failDocument)) {
+			throw new Error("hindsight 500: fact extraction refused");
+		}
+		await super.retain(bank, items);
+	}
+}
 
 let scratch: string;
 const states: LocalState[] = [];
@@ -195,6 +214,47 @@ test("prompts before --measure-from seed the store and are never measured", asyn
 		expect.arrayContaining([texts.a0u, texts.a0a, texts.a1u, texts.a1a, texts.a2u]),
 	);
 	for (const record of bank) expect(uses(record.text).useCount).toBe(0);
+});
+
+test("a failed retain is one warning; the walk goes on and the next prompt still recalls", async () => {
+	let clockNow = now;
+	const clock = { set: (at: Date) => (clockNow = at) };
+	const state = new LocalState({
+		directory: join(scratch, `s${states.length}`),
+		clock: () => clockNow,
+	});
+	states.push(state);
+	// The retain of live-a's second prompt (walk position 2) is rejected by the store.
+	const store = new FlakyStore(() => clockNow, "live-a.jsonl:1:user");
+	const result = await runReplay({
+		prompts,
+		store,
+		state,
+		config,
+		top: 10,
+		random: counter(),
+		now,
+		live: { uses: "none", clock },
+	});
+	// The run resolves with exactly one warning: the transcript, the prompt index, the message.
+	expect(result.warnings).toEqual([
+		"retain failed live-a.jsonl#1: hindsight 500: fact extraction refused",
+	]);
+	// The walk is otherwise unchanged: the same prompts measured, the same seeded count.
+	expect(result.entries.map((entry) => entry.prompt.text)).toEqual(
+		noneWalk.entries.map((entry) => entry.prompt.text),
+	);
+	expect(result.live?.seeded).toBe(noneWalk.live?.seeded);
+	// The prompt after the failed one recalls what was retained before the failure, and never
+	// the failed prompt's turns.
+	const after = result.entries[3];
+	if (!after) throw new Error("no entry after the failed prompt");
+	const listed = [...after.store, ...after.activation].map((memory) => memory.text);
+	expect(listed).toEqual(expect.arrayContaining([texts.a0u, texts.a0a, texts.b0u, texts.b0a]));
+	expect(listed).not.toContain(texts.a1u);
+	expect(listed).not.toContain(texts.a1a);
+	// No retry: exactly one retain call per prompt.
+	expect(store.retainCalls).toBe(prompts.length);
 });
 
 test("the sweep runs on the replayed day change: an unused day-1 memory is dormant by day 60", async () => {

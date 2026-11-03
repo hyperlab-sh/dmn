@@ -265,6 +265,17 @@ async function runLiveReplay({
 	if (live.uses === "judged" && !live.judge) throw new Error('live uses "judged" needs a judge');
 	const utcDay = (at: Date) => at.toISOString().slice(0, 10);
 	const sweepBanks = (cue: Cue) => [...new Set([bankFor(cue.organization), bankFor(undefined)])];
+	/**
+	 * One prompt's retain; a store that rejects it (an error, a timeout, an HTTP 4xx/5xx from
+	 * Hindsight) costs a warning naming the transcript, the prompt index and the message, and
+	 * the walk goes on. Never retried: the retry policy is Hindsight's own (D37).
+	 */
+	const retainOrWarn = (prompt: ReplayPrompt, cue: Cue, at: Date) =>
+		retainPrompt(store, cue, prompt, prompt.answer ?? "", at).catch((error: unknown) => {
+			warnings.push(
+				`retain failed ${prompt.file ?? "transcript"}#${prompt.index}: ${(error as Error).message}`,
+			);
+		});
 	let lastDay: string | undefined;
 	let seeded = 0;
 	let lastAt = now;
@@ -290,9 +301,10 @@ async function runLiveReplay({
 		}
 		lastDay = utcDay(at);
 		if (live.measureFrom !== undefined && at < live.measureFrom) {
-			// Seeding: retained with its own time, never recalled, judged or reported.
+			// Seeding: retained with its own time, never recalled, judged or reported. The prompt
+			// counts as seeded whatever its retain does — a failure is a warning, not a shorter walk.
 			seeded += 1;
-			await retainPrompt(store, cue, prompt, prompt.answer ?? "", at);
+			await retainOrWarn(prompt, cue, at);
 			continue;
 		}
 		const entry = await measurePrompt({
@@ -321,8 +333,9 @@ async function runLiveReplay({
 				(error) => warnings.push(`judge: ${(error as Error).message}`),
 			);
 		}
-		// The Stop hook's retain, at the prompt's own time: the next prompt can recall it.
-		await retainPrompt(store, cue, prompt, prompt.answer ?? "", at);
+		// The Stop hook's retain, at the prompt's own time: the next prompt can recall it. A
+		// failed one is reported above and skipped; later prompts recall what did land (D37).
+		await retainOrWarn(prompt, cue, at);
 	}
 	// Once more, with the last replayed clock: the run ends like a day a live install swept.
 	if (lastCue) await sweep({ store, state, config, banks: sweepBanks(lastCue), now: lastAt });

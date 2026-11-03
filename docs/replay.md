@@ -149,6 +149,11 @@ time, exactly as they would have.
 - **Seeding and measuring in one run.** `--measure-from <iso>` retains-only the prompts before
   it: they are never recalled, judged or reported. Point it at the date you installed dmn and
   the same run seeds the store from the older sessions and measures the newer ones.
+- **A failed retain does not stop the walk.** When the store rejects a prompt's retain — a
+  store error, a timeout, an HTTP 4xx/5xx from Hindsight — the run reports it as a warning
+  (`retain failed <transcript>#<index>: <message>`) and continues with the next prompt; the
+  exit code is unchanged. dmn never retries a failed retain: the retry policy is Hindsight's
+  own.
 - **The report.** The header gains `mode: as-live`, `uses:`, `measure-from:` and `seeded:`
   after `top:`; `dmn replay score` reads `top:` as before and ignores the rest. Judging and
   scoring work on the run exactly as on a plain one.
@@ -176,8 +181,12 @@ backfilled memories carry their content time, never the ingest time — under th
 limits the prompts taken per transcript (default 40; the lead measured with 25). `--dry`
 prints one line per transcript — `prompts=`, `retained=` and the skipped-reason counts — and
 retains nothing; it needs no store. Without `--dry` the run prints `total retained N` and
-needs `DMN_STORE_URL`. A transcript prompt without a timestamp exits 2 naming the file and
-the prompt's index, before anything is retained.
+needs `DMN_STORE_URL`. A retain the store rejects — a store error, a timeout, an HTTP 4xx/5xx
+from Hindsight — does not stop the run: the transcript's line counts it (`failed=N` beside
+`retained=`), `total retained` counts only successful retains, and the exit code is 1 only
+when nothing was retained at all and at least one retain failed. Failed retains are not
+retried: the retry policy is Hindsight's own. A transcript prompt without a timestamp exits 2
+naming the file and the prompt's index, before anything is retained.
 
 ## Known limitation: the cue is rebuilt without the filesystem
 
