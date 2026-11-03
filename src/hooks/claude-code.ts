@@ -129,7 +129,7 @@ async function inject(event: HookEvent, deps: HookDeps): Promise<HookOutput> {
 	return { hookSpecificOutput: { hookEventName: event.name, additionalContext } };
 }
 
-/** Counts cited memories first (local, cannot fail on the network), then retains the turns. */
+/** Counts cited memories the store confirms, then retains the turns; a store that cannot confirm only costs the uses. */
 async function finishTurn(event: HookEvent, deps: HookDeps): Promise<HookOutput> {
 	// Our Stop hook never blocks, so a continuation is not ours; the turn was handled already.
 	if (event.stopHookActive || !event.transcriptPath) return null;
@@ -138,8 +138,15 @@ async function finishTurn(event: HookEvent, deps: HookDeps): Promise<HookOutput>
 	const cue = cueFor(event, deps.config);
 	const banks = [...new Set([bankFor(cue.organization), bankFor(undefined)])];
 	// A cited id counts only when the store knows it: hallucinated markers earn nothing.
-	const isKnown = async (id: string) =>
-		(await Promise.all(banks.map((bank) => deps.store.get(bank, id)))).some(Boolean);
+	const isKnown = async (id: string) => {
+		try {
+			return (await Promise.all(banks.map((bank) => deps.store.get(bank, id)))).some(Boolean);
+		} catch (error) {
+			// An unreachable store must not cost the turn its retention: skip the count, go on.
+			deps.onWarning?.(`dmn: cannot resolve cited id ${id}: ${(error as Error).message}`);
+			return false;
+		}
+	};
 	await countCitedUses(deps.state, turns.assistant, turns.turnId, isKnown);
 	await retainTurns(
 		deps.store,

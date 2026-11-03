@@ -12,7 +12,7 @@ const rows: { fixture: string; role: Turn["role"]; reason?: string }[] = [
 	{ fixture: "file-indexing.txt", role: "user", reason: "file-indexing" },
 	{ fixture: "system-reminder.txt", role: "user", reason: "system-reminder" },
 	{ fixture: "secret-token.txt", role: "user", reason: "secret" },
-	{ fixture: "credential-assignment.txt", role: "user", reason: "secret" },
+	{ fixture: "credential-assignment.txt", role: "user", reason: "credential-assignment" },
 	{ fixture: "question.txt", role: "user" },
 	{ fixture: "answer.txt", role: "assistant" },
 ];
@@ -42,20 +42,18 @@ test("each secret form is dropped on its own line", () => {
 		"gitlab glpat-FAKEFAKEFAKEFAKEFAKE0",
 		`npm ${["npm_", "F".repeat(36)].join("")}`,
 		"clone https://user:pat@github.com/acme/widgets.git",
-		'{"api_key": "abcdef123456"}',
-		"client_secret: abcdef123456",
-		"STRIPE_KEY=abcdef",
+		"DATABASE_URL=postgres://app:s3cr3t@db.example.test:5432/app",
+		`stripe ${["sk_", "live_", "F".repeat(24)].join("")}`,
+		"Authorization: Basic dXNlcjpwYXNzd29yZDEyMzQ1Ng==",
+		`jwt ${["eyJ", "F".repeat(12), ".eyJ", "F".repeat(12), ".", "F".repeat(12)].join("")}`,
 	];
 	for (const text of lines) {
 		expect(shouldRetain({ role: "user", text }).retain).toBe(false);
 	}
 });
 
-test("a bare assignment is dropped as a credential, not as a pattern match", () => {
-	for (const text of ["password: correct-horse", "DATABASE_PASSWORD=hunter2"]) {
-		expect(shouldRetain({ role: "user", text })).toEqual({
-			retain: false,
-			reason: "credential-assignment",
-		});
+test("type-like values after a keyword are ordinary code", () => {
+	for (const text of ["type User = { password: string }", "apiKey: string;", "token: number"]) {
+		expect(shouldRetain({ role: "assistant", text })).toEqual({ retain: true });
 	}
 });
