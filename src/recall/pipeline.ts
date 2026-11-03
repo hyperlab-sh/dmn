@@ -26,6 +26,11 @@ export interface RecallInput {
 	now?: Date;
 }
 
+/** The query recall sends to the store and the judge: the prompt, or the cue's phrase without one. */
+export function recallQuery(prompt: string | undefined, cue: Cue): string {
+	return prompt?.trim() || cueText(cue);
+}
+
 /**
  * Async because the store is: callers must await it.
  * Candidates from the cue's organization bank and `generic`, minus dormant, ranked by activation. */
@@ -44,7 +49,7 @@ export async function recall({
 }: RecallInput): Promise<RankedMemory[]> {
 	const banks = [...new Set([bankFor(cue.organization), bankFor(undefined)])];
 	const query = {
-		query: prompt?.trim() || cueText(cue),
+		query: recallQuery(prompt, cue),
 		tags: softTags(cue),
 		tagsMatch: "any" as const,
 		topK: config.topK,

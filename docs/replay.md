@@ -89,6 +89,12 @@ then takes the top `n`. `report.md` gains an `activation+judge:` list per prompt
 is already filled, so `replay judge` has nothing left to ask for them. The `store` and `activation`
 lists are unchanged by the flag. Use `fake` offline, `laya` for the real gate.
 
+Read the third row with care: its entries are labelled by the judge that filtered them, so under
+the same judge and threshold `activation+judge` is an upper bound by construction (close to 1;
+only unanswered or secret items and short lists lower it). It is comparable with the other rows
+only when their labels come from a human, or from a different judge or threshold
+(`replay judge --threshold` relabels it).
+
 ## Score
 
 ```bash
@@ -106,7 +112,8 @@ memories among a prompt's first n shown, over n, averaged over the prompts. A sh
 still divided by n. Entries left at `null` count as not useful; `judged` says how many you
 filled in. The command rewrites the `## Summary` section of `report.md` with both numbers side
 by side (before scoring it says `unscored`). A run made with `--judge` also prints, and writes, an
-`activation+judge p@n` row; runs without one score as before.
+`activation+judge p@n` row; runs without one score as before. That row is an upper bound under the
+same judge and threshold (see above), not a gain.
 
 Read the number as a comparison on your own prompts, not an absolute: a gap of one memory per
 prompt on a few dozen prompts is signal; a gap on five prompts is noise, and the activation

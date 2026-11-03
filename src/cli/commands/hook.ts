@@ -27,6 +27,27 @@ async function readStdin(): Promise<string> {
 	return Buffer.concat(chunks).toString("utf8");
 }
 
+/**
+ * The judge a hook uses, or undefined when it uses none. Stop never judges, so a missing key cannot
+ * cost a turn's retention; nor does PostToolUse with intrusive thoughts off. The judge's timeout is
+ * capped at the hook's own limit (a tool call's thought has `intrusionTimeoutMs`). Throws
+ * ConfigError for provider "laya" without `LAYA_API_KEY`.
+ */
+export function hookJudge(
+	event: HookEventName,
+	config: ReturnType<typeof loadConfig>,
+	env: Record<string, string | undefined>,
+): Judge | undefined {
+	if (event === "Stop" || (event === "PostToolUse" && config.intrusionThreshold === null)) {
+		return undefined;
+	}
+	const limit = event === "PostToolUse" ? config.intrusionTimeoutMs : config.storeTimeoutMs;
+	return createJudge(
+		{ ...config, judge: { ...config.judge, timeoutMs: Math.min(config.judge.timeoutMs, limit) } },
+		env,
+	);
+}
+
 /** Runs `dmn hook <subcommand>`; returns the exit code. Output is the hook JSON, or nothing. */
 export async function runHook(
 	subcommand: string | undefined,
@@ -43,21 +64,8 @@ export async function runHook(
 	let judge: Judge | undefined;
 	try {
 		config = loadConfig({ env });
-		// A missing key is a config error (exit 2 for user-prompt). Stop never judges, so it cannot
-		// lose a turn's retention to the judge; a tool call's thought has intrusionTimeoutMs.
-		if (
-			expected !== "Stop" &&
-			!(expected === "PostToolUse" && config.intrusionThreshold === null)
-		) {
-			const limit = expected === "PostToolUse" ? config.intrusionTimeoutMs : config.storeTimeoutMs;
-			judge = createJudge(
-				{
-					...config,
-					judge: { ...config.judge, timeoutMs: Math.min(config.judge.timeoutMs, limit) },
-				},
-				env,
-			);
-		}
+		// A missing key is a config error (exit 2 for user-prompt).
+		judge = hookJudge(expected, config, env);
 	} catch (error) {
 		if (error instanceof ConfigError) {
 			process.stderr.write(`dmn: ${error.message}\n`);

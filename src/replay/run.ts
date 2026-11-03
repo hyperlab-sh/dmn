@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 import type { Config } from "../config/config.js";
-import { buildCue, type Cue, cueText, softTags } from "../cue/cue.js";
+import { buildCue, type Cue, softTags } from "../cue/cue.js";
 import type { Manifest } from "../cue/stack.js";
 import type { Judge } from "../judge/types.js";
-import { judgeGate, recall } from "../recall/pipeline.js";
+import { judgeGate, recall, recallQuery } from "../recall/pipeline.js";
 import type { RankedMemory } from "../recall/rerank.js";
 import type { LocalState } from "../state/state.js";
 import { FakeStore } from "../store/fake.js";
@@ -111,14 +111,8 @@ export async function runReplay({
 			random,
 			now,
 		});
-		const byStore = await storeOrder(
-			store,
-			config,
-			cue,
-			prompt.text.trim() || cueText(cue),
-			softTags(cue),
-		);
-		const query = prompt.text.trim() || cueText(cue);
+		const query = recallQuery(prompt.text, cue);
+		const byStore = await storeOrder(store, config, cue, query, softTags(cue));
 		const gated = gate
 			? await judgeGate(ranked, query, gate.judge, gate.threshold, (error) =>
 					warnings.push(`judge: ${(error as Error).message}`),
