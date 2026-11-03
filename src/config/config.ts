@@ -245,11 +245,13 @@ function readJudge(value: unknown, defaults: JudgeConfig): JudgeConfig {
 
 /**
  * The configured judge, or undefined for provider `none`. The key comes from the environment
- * only and has no default.
+ * only and has no default. `options.deadlineMs` bounds a whole call — attempts, retries and
+ * waits — for callers with a latency budget (hooks); without it only each attempt is bounded.
  */
 export function createJudge(
 	config: Config,
 	env: Record<string, string | undefined>,
+	options?: { deadlineMs?: number },
 ): (Judge & KindJudge) | undefined {
 	if (config.judge.provider === "none") return undefined;
 	const apiKey = env.LAYA_API_KEY;
@@ -262,6 +264,7 @@ export function createJudge(
 		apiKey,
 		timeoutMs: config.judge.timeoutMs,
 		...(config.judge.baseUrl && { baseUrl: config.judge.baseUrl }),
+		...(options?.deadlineMs !== undefined && { deadlineMs: options.deadlineMs }),
 	});
 }
 

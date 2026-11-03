@@ -19,12 +19,17 @@ export interface LayaOptions {
 	apiKey: string;
 	/** Default `https://api.laya.studio`; a local model server may answer the same API. */
 	baseUrl?: string;
-	/** Per-call limit. Default 30000: a 64-item batch of 512-token inputs is not a hook. */
+	/** Per-attempt limit. Default 30000: a 64-item batch of 512-token inputs is not a hook. */
 	timeoutMs?: number;
+	/**
+	 * Whole-call limit across attempts, retries and waits, so a 429 storm cannot outlive the
+	 * caller's budget; `timeoutMs` alone bounds one attempt. Default: no deadline.
+	 */
+	deadlineMs?: number;
 	fetch?: typeof fetch;
 	sleep?: (milliseconds: number) => Promise<void>;
 	random?: () => number;
-	/** Clock for `Retry-After` given as an HTTP date. */
+	/** Clock for `Retry-After` given as an HTTP date and for the deadline. */
 	now?: () => number;
 }
 
@@ -88,6 +93,7 @@ export class LayaJudge implements Judge, KindJudge {
 	private readonly apiKey: string;
 	private readonly url: string;
 	private readonly timeoutMs: number;
+	private readonly deadlineMs: number | undefined;
 	private readonly fetcher: typeof fetch;
 	private readonly sleep: (milliseconds: number) => Promise<void>;
 	private readonly random: () => number;
@@ -97,6 +103,7 @@ export class LayaJudge implements Judge, KindJudge {
 		apiKey,
 		baseUrl = layaBaseUrl,
 		timeoutMs = 30_000,
+		deadlineMs,
 		fetch: fetcher = globalThis.fetch,
 		sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
 		random = Math.random,
@@ -105,6 +112,7 @@ export class LayaJudge implements Judge, KindJudge {
 		this.apiKey = apiKey;
 		this.url = `${baseUrl.replace(/\/+$/, "")}/v1/systemone/batch`;
 		this.timeoutMs = timeoutMs;
+		this.deadlineMs = deadlineMs;
 		this.fetcher = fetcher;
 		this.sleep = sleep;
 		this.random = random;
@@ -112,14 +120,18 @@ export class LayaJudge implements Judge, KindJudge {
 	}
 
 	async judge(prompt: string, memories: JudgeMemory[]): Promise<Judgement[]> {
+		const startedAt = this.now();
 		const judgements: Judgement[] = [];
 		for (let start = 0; start < memories.length; start += batchLimit) {
-			judgements.push(...(await this.batch(prompt, memories.slice(start, start + batchLimit))));
+			judgements.push(
+				...(await this.batch(prompt, memories.slice(start, start + batchLimit), startedAt)),
+			);
 		}
 		return judgements;
 	}
 
 	async classify(texts: string[]): Promise<Classification[]> {
+		const startedAt = this.now();
 		const classifications: Classification[] = [];
 		for (let start = 0; start < texts.length; start += batchLimit) {
 			const slice = texts.slice(start, start + batchLimit);
@@ -129,20 +141,32 @@ export class LayaJudge implements Judge, KindJudge {
 					questions: kindQuestions,
 				})),
 			});
-			classifications.push(...this.parseKinds(await this.post(body), slice, start));
+			classifications.push(...this.parseKinds(await this.post(body, startedAt), slice, start));
 		}
 		return classifications;
 	}
 
-	private async batch(prompt: string, memories: JudgeMemory[]): Promise<Judgement[]> {
+	private async batch(
+		prompt: string,
+		memories: JudgeMemory[],
+		startedAt: number,
+	): Promise<Judgement[]> {
 		const body = JSON.stringify({
 			requests: memories.map((memory) => ({ state: state(prompt, memory), questions })),
 		});
-		return this.parse(await this.post(body), memories);
+		return this.parse(await this.post(body, startedAt), memories);
 	}
 
-	/** One POST with the retries and timeout shared by both questions; returns the JSON payload. */
-	private async post(body: string): Promise<unknown> {
+	/**
+	 * One POST with the retries and timeout shared by both questions; returns the JSON payload.
+	 * `startedAt` is the public call's start: the deadline bounds the whole call, not one batch.
+	 */
+	private async post(body: string, startedAt: number): Promise<unknown> {
+		// Milliseconds left of the whole-call budget; infinite without a deadline.
+		const remaining = () =>
+			this.deadlineMs === undefined
+				? Number.POSITIVE_INFINITY
+				: this.deadlineMs - (this.now() - startedAt);
 		for (let attempt = 1; ; attempt++) {
 			let response: Response;
 			try {
@@ -150,7 +174,7 @@ export class LayaJudge implements Judge, KindJudge {
 					method: "POST",
 					headers: { "content-type": "application/json", authorization: `Bearer ${this.apiKey}` },
 					body,
-					signal: AbortSignal.timeout(this.timeoutMs),
+					signal: AbortSignal.timeout(Math.max(0, Math.min(this.timeoutMs, remaining()))),
 				});
 			} catch (error) {
 				throw new JudgeError(`POST ${this.url} failed: ${(error as Error).message}`, 0);
@@ -170,9 +194,15 @@ export class LayaJudge implements Judge, KindJudge {
 				);
 			}
 			const backoff = baseDelayMs * 2 ** (attempt - 1) * (0.5 + this.random() / 2);
-			await this.sleep(
-				Math.min(maxDelayMs, Math.max(retryAfterMs(response, this.now()) ?? 0, backoff)),
-			);
+			const wait = Math.min(maxDelayMs, Math.max(retryAfterMs(response, this.now()) ?? 0, backoff));
+			// The budget is spent, or the wait alone would blow it: stop rather than hold the caller.
+			if (wait >= remaining()) {
+				throw new JudgeError(
+					`POST ${this.url} abandoned: ${this.deadlineMs}ms deadline reached before attempt ${attempt + 1}`,
+					0,
+				);
+			}
+			await this.sleep(wait);
 		}
 	}
 
