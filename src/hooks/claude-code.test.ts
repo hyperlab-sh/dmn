@@ -238,3 +238,34 @@ test("a store that cannot resolve cited ids costs the uses, not the retention", 
 	expect((await down.listTags("generic")).map(({ tag }) => tag)).toContain("kind:turn");
 	expect(warnings.join("\n")).toContain("cannot resolve cited id abc: store down");
 });
+
+test("stop records one co-use edge per turn for the cited, known ids", async () => {
+	await store.retain("generic", [
+		{ content: "gamma fact", tags: [] },
+		{ content: "delta fact", tags: [] },
+	]);
+	const all = await store.list("generic", { limit: 50, offset: 0 });
+	const idOf = (text: string) => all.find((memory) => memory.text === text)?.id as string;
+	const [g, d] = [idOf("gamma fact"), idOf("delta fact")] as [string, string];
+	const calls: [string[], string][] = [];
+	const spy = new Proxy(state, {
+		get(target, property) {
+			if (property === "recordCoUse") {
+				return (ids: string[], turnId: string) => {
+					calls.push([ids, turnId]);
+					target.recordCoUse(ids, turnId);
+				};
+			}
+			const value = Reflect.get(target, property, target);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	});
+	const transcript_path = cite("co.jsonl", `[m:${g}] and [m:${d}], not [m:nope].`);
+	await handleHookEvent(event({ hook_event_name: "Stop", transcript_path }), {
+		...deps,
+		state: spy,
+	});
+	expect(calls).toHaveLength(1);
+	expect([...(calls[0]?.[0] ?? [])].sort()).toEqual([g, d].sort());
+	expect(state.associations(g)).toEqual([{ id: d, weight: 1 }]);
+});

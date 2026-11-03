@@ -21,7 +21,7 @@ Located at `$XDG_CONFIG_HOME/dmn/config.json`. Every key is optional.
 | -------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | `budgetTokens`       | `600`                                          | Token budget of one injection (one token per four characters).                                 |
 | `topK`               | `10`                                           | Candidates fetched per bank before reranking.                                                  |
-| `promptThreshold`    | `-0.5`                                         | Reserved for prompt-time filtering by activation.                                              |
+| `promptThreshold`    | `-0.5`                                         | Activation above which a memory lends activation to its co-used associates (Co-use, below).    |
 | `intrusionThreshold` | `0.5`                                          | Retrieval-probability threshold of intrusive thoughts; `null` turns them off (below).          |
 | `intrusionCooldown`  | `5`                                            | Tool calls a session must make after an intrusive thought before the next.                     |
 | `dormancyFloor`      | `-2.0`                                         | Base-level activation below which a memory may go dormant.                                     |
@@ -32,7 +32,7 @@ Located at `$XDG_CONFIG_HOME/dmn/config.json`. Every key is optional.
 | `retainTimeoutMs`    | `60000`                                        | Limit for retain, which waits on fact extraction.                                              |
 | `fanCacheSeconds`    | `300`                                          | How long tag counts are cached.                                                                |
 | `replayDir`          | `$XDG_DATA_HOME/dmn/replay`                    | Where replay runs are written.                                                                 |
-| `activation`         | ACT-R defaults                                 | Overrides for the activation parameters.                                                       |
+| `activation`         | ACT-R defaults                                 | Overrides for the activation parameters, including `associationWeight` (default `0.5`).        |
 
 ### Organizations
 
@@ -72,6 +72,20 @@ random draw. Most calls print nothing.
   recalls nor prints.
 
 A surfaced thought is not a use: it counts only if the assistant cites its marker later.
+
+## Co-use
+
+A co-use edge links two memories the assistant cited in the same turn, whatever their tags say. The
+Stop hook adds 1 to the edge of every pair of distinct cited ids (once per turn, however often
+the hook runs) and stamps when it last grew. Edges come only from citations: a memory that was
+merely injected never earns one. They live in `state.sqlite`.
+
+At recall, a memory associated with a candidate activated above `promptThreshold` gains
+`associationWeight · (edge weight / that candidate's total edge weight) · max(0, S_max − ln(1 + fan))`,
+where `fan` is the number of memories associated with the lending candidate. The terms are
+summed over the lenders, computed once from the activations before the association is added, and
+shown as `assoc=` on the replay report's activation line. Set `activation.associationWeight` to
+`0` to turn the term off.
 
 ## Install
 

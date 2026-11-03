@@ -53,6 +53,7 @@ export async function recall({
 	return rerank(candidates, cue, fans, {
 		state,
 		parameters: config.activation,
+		promptThreshold: config.promptThreshold,
 		random,
 		now,
 	});

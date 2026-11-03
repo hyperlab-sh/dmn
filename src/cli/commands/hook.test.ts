@@ -175,3 +175,39 @@ test("a memory cited at stop ranks above the others on the next prompt", async (
 		state.close();
 	}
 });
+
+test("stop records a co-use edge for two cited memories once, and none for one", async () => {
+	const [a, b] = [
+		ids["Retry delays in the sync worker use jitter."],
+		ids["The sync worker logs every retry delay."],
+	] as [string, string];
+	const transcriptFor = (name: string, text: string) => {
+		const path = join(scratch, name);
+		writeFileSync(
+			path,
+			[
+				{ type: "user", uuid: `u-${name}`, message: { role: "user", content: "Which?" } },
+				{
+					type: "assistant",
+					uuid: `a-${name}`,
+					message: { role: "assistant", content: [{ type: "text", text }] },
+				},
+			]
+				.map((entry) => JSON.stringify(entry))
+				.join("\n"),
+		);
+		return path;
+	};
+	const pair = transcriptFor("pair.jsonl", `Both [m:${a}] and [m:${b}] apply.`);
+	await run("stop", "stop.json", { transcript: pair });
+	await run("stop", "stop.json", { transcript: pair });
+	await run("stop", "stop.json", { transcript: transcriptFor("one.jsonl", `Only [m:${a}].`) });
+	const state = new LocalState({ directory: join(scratch, "state", "dmn") });
+	try {
+		const [low, high] = [a, b].sort() as [string, string];
+		expect(state.associations(low)).toEqual([{ id: high, weight: 1 }]);
+		expect(state.associationFan(a)).toBe(1);
+	} finally {
+		state.close();
+	}
+});

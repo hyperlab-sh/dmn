@@ -82,7 +82,7 @@ export function writeReport(result: ReplayResult, directory: string): void {
 		lines.push("", "activation:");
 		entry.activation.forEach((memory, rank) => {
 			lines.push(
-				`${rank + 1}. ${memory.id} A=${number(memory.activation)} (B=${number(memory.baseLevel)} S=${number(memory.spreading)} noise=${number(memory.noise)}) ${oneLine(memory.text, 80)}`,
+				`${rank + 1}. ${memory.id} A=${number(memory.activation)} (B=${number(memory.baseLevel)} S=${number(memory.spreading)} noise=${number(memory.noise)} assoc=${number(memory.association)}) ${oneLine(memory.text, 80)}`,
 			);
 			judgements.push({ prompt: entry.number, id: memory.id, order: "activation", useful: null });
 		});

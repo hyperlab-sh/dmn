@@ -24,6 +24,8 @@ export interface ActivationParameters {
 	retrievalThreshold: number;
 	/** s: scale of the logistic noise added to activation. */
 	noiseScale: number;
+	/** Scale of the co-use association term added to activation. 0 turns it off. */
+	associationWeight: number;
 }
 
 export const defaultActivationParameters: Readonly<ActivationParameters> = {
@@ -31,6 +33,7 @@ export const defaultActivationParameters: Readonly<ActivationParameters> = {
 	maximumAssociativeStrength: 1.6,
 	retrievalThreshold: -0.5,
 	noiseScale: 0.25,
+	associationWeight: 0.5,
 };
 
 /**

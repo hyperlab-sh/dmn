@@ -1,4 +1,5 @@
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
+import { defaultActivationParameters } from "../activation/act-r.js";
 import type { Cue } from "../cue/cue.js";
 import type { MemoryUses } from "../state/state.js";
 import type { MemoryRecord } from "../store/types.js";
@@ -19,7 +20,16 @@ const memory = (id: string, createdAt: string, tags: string[]): MemoryRecord => 
 	tags,
 	createdAt,
 });
-const stateWith = (counts: Record<string, number>, firstSeen: Record<string, string> = {}) => ({
+const stateWith = (
+	counts: Record<string, number>,
+	firstSeen: Record<string, string> = {},
+	edges: [string, string, number][] = [],
+) => ({
+	associations: (id: string) =>
+		edges.flatMap(([a, b, weight]) =>
+			a === id ? [{ id: b, weight }] : b === id ? [{ id: a, weight }] : [],
+		),
+	associationFan: (id: string) => edges.filter(([a, b]) => a === id || b === id).length,
 	uses: (id: string): MemoryUses => ({
 		useCount: counts[id] ?? 0,
 		firstSeenAt: firstSeen[id] ?? null,
@@ -93,4 +103,60 @@ test("an empty or unparseable createdAt falls back to firstSeenAt", () => {
 		const [ranked] = rerank([memory("x", createdAt, [])], cue, new Map(), options);
 		expect(ranked?.baseLevel).toBeCloseTo(good?.baseLevel ?? Number.NaN, 10);
 	}
+});
+
+describe("association", () => {
+	const candidates = () => ["x", "y", "z"].map((id) => memory(id, daysAgo(5), []));
+	// X is used enough to sit above the default threshold; Y and Z are equal and below it.
+	const counts = { x: 40 };
+	const run = (edges: [string, string, number][], parameters = defaultActivationParameters) =>
+		rerank(candidates(), cue, new Map(), {
+			state: stateWith(counts, {}, edges),
+			parameters,
+			random: middle,
+			now,
+		});
+	const by = (ranked: ReturnType<typeof run>, id: string) =>
+		ranked.find((m) => m.id === id) as ReturnType<typeof run>[number];
+
+	test("a memory associated with a highly activated one outranks an equal one", () => {
+		const ranked = run([
+			["x", "y", 1],
+			["x", "q", 1],
+		]);
+		const x = by(ranked, "x");
+		expect(x.activation).toBeGreaterThan(-0.5);
+		expect(ranked.map((m) => m.id)).toEqual(["x", "y", "z"]);
+		// w_XY / Σ_k w_Xk = 1/2 and fan_X = 2.
+		const expected =
+			0.5 *
+			(1 / 2) *
+			Math.max(0, defaultActivationParameters.maximumAssociativeStrength - Math.log(3));
+		expect(by(ranked, "y").association).toBeCloseTo(expected, 9);
+		expect(by(ranked, "z").association).toBe(0);
+		expect(by(ranked, "y").activation).toBeCloseTo(
+			by(ranked, "y").baseLevel + by(ranked, "y").spreading + by(ranked, "y").noise + expected,
+			9,
+		);
+	});
+
+	test("associationWeight 0 leaves the tie-break order and no association", () => {
+		const ranked = run([["x", "y", 1]], { ...defaultActivationParameters, associationWeight: 0 });
+		expect(ranked.map((m) => m.id)).toEqual(["x", "y", "z"]);
+		for (const m of ranked) expect(m.association).toBe(0);
+		const reversed = rerank([...candidates()].reverse(), cue, new Map(), {
+			state: stateWith(counts, {}, [["x", "z", 1]]),
+			parameters: { ...defaultActivationParameters, associationWeight: 0 },
+			random: middle,
+			now,
+		});
+		expect(reversed.map((m) => m.id)).toEqual(["x", "z", "y"]);
+	});
+
+	test("a partner below the threshold lends nothing", () => {
+		// Y is associated with Z, but neither is activated above the threshold.
+		const ranked = run([["y", "z", 1]]);
+		expect(by(ranked, "y").association).toBe(0);
+		expect(by(ranked, "z").association).toBe(0);
+	});
 });

@@ -11,6 +11,7 @@ const ranked = (id: string, text: string): RankedMemory => ({
 	baseLevel: 0,
 	spreading: 0,
 	noise: 0,
+	association: 0,
 });
 
 const memories = [
