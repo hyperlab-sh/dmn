@@ -1,17 +1,20 @@
 #!/usr/bin/env node
-import { ConfigError, loadConfig } from "../config/config.js";
+import { runHook } from "./commands/hook.js";
+import { runInstall } from "./commands/install.js";
 
 const usage = `dmn — Default Mode Network
 
 Usage:
   dmn --version
+  dmn install [--settings <path>]   add the Claude Code hooks (default ~/.claude/settings.json)
+  dmn hook <session-start|user-prompt|post-tool|stop>   run by Claude Code, reads the event on stdin
   dmn help
   dmn replay <transcript.jsonl>... | dmn replay score <run-dir>
 
 See https://github.com/hyperlab-sh/dmn for the roadmap.
 `;
 
-const [command = "help"] = process.argv.slice(2);
+const [command = "help", ...rest] = process.argv.slice(2);
 
 switch (command) {
 	case "--version":
@@ -28,17 +31,10 @@ switch (command) {
 		process.exitCode = await (await import("./commands/replay.js")).run(process.argv.slice(3));
 		break;
 	case "hook":
-		try {
-			loadConfig({ env: process.env });
-		} catch (error) {
-			if (error instanceof ConfigError) {
-				process.stderr.write(`dmn: ${error.message}\n`);
-				process.exit(2);
-			}
-			throw error;
-		}
-		process.stderr.write("dmn: hook commands are not implemented yet\n");
-		process.exit(1);
+		process.exitCode = await runHook(rest[0], process.env);
+		break;
+	case "install":
+		process.exitCode = runInstall(rest, process.env);
 		break;
 	default:
 		process.stderr.write(`dmn: unknown command "${command}"\n\n${usage}`);
