@@ -2,10 +2,11 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { RestReport } from "../../rest/rest.js";
 import { LocalState } from "../../state/state.js";
 import { startFakeServer } from "../../store/fake.js";
 import { HindsightStore } from "../../store/hindsight.js";
-import { runRestCommand } from "./rest.js";
+import { printRest, runRestCommand } from "./rest.js";
 
 const root = new URL("../../..", import.meta.url).pathname;
 const bank = "org-acme";
@@ -70,6 +71,38 @@ beforeAll(async () => {
 afterAll(() => {
 	server.stop();
 	rmSync(scratch, { recursive: true, force: true });
+});
+
+test("the report mapping exits 1 when a promotion was refused, with the proposal still reported", () => {
+	const report: RestReport = {
+		banks: [
+			{
+				bank: "org-acme",
+				consolidation: { operationId: "op-1", deduplicated: 0 },
+				learnings: 1,
+				proposals: [
+					{
+						id: "x",
+						fromScope: "project",
+						toScope: "organization",
+						fromBank: "org-acme",
+						toBank: "org-acme",
+						projects: ["a", "b"],
+						content: "learning",
+						tags: ["kind:learning"],
+					},
+				],
+				applied: [],
+				failed: ["x"],
+			},
+		],
+	};
+	const lines: string[] = [];
+	expect(printRest(report, true, (line) => lines.push(line))).toBe(1);
+	expect(lines).toEqual([
+		"consolidated org-acme: 0 deduplicated\n",
+		"promote x project → organization (projects: a, b)\n",
+	]);
 });
 
 test("rest prints the report of every bank it was asked for; --apply prints what it promoted", async () => {

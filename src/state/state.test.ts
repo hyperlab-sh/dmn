@@ -107,25 +107,44 @@ test("recordPromotion writes one row per memory, stamped by the clock; isPromote
 });
 
 test("markPromoted writes dormancy and the promotion as one write at one timestamp", () => {
-	now = at(0);
-	state.markPromoted("m5", "generic");
-	expect(state.isDormant("m5")).toBe(true);
-	expect(state.isPromoted("m5")).toBe(true);
-	const reader = new Database(join(directory, "nested", "state.sqlite"), { readonly: true });
+	// A clock that advances per read: two separate stamps would differ, one shared stamp cannot.
+	const ticks = [at(0), at(1)];
+	let tick = 0;
+	const own = mkdtempSync(join(tmpdir(), "dmn-state-markpromoted-"));
 	try {
-		const dormantAt = reader
-			.query<{ dormant_at: string }, [string]>("SELECT dormant_at FROM dormant WHERE memory_id = ?")
-			.get("m5")?.dormant_at;
-		const promotion = reader
-			.query<{ scope: string; at: string }, [string]>(
-				"SELECT scope, at FROM promotions WHERE memory_id = ?",
-			)
-			.get("m5");
-		// Both rows carry the same stamp: the two writes are one.
-		expect(dormantAt).toBe("2026-01-01T00:00:00.000Z");
-		expect(promotion).toEqual({ scope: "generic", at: "2026-01-01T00:00:00.000Z" });
+		const state = new LocalState({
+			directory: own,
+			clock: () => ticks[tick++] ?? at(9),
+		});
+		try {
+			state.markPromoted("m5", "generic");
+			expect(state.isDormant("m5")).toBe(true);
+			expect(state.isPromoted("m5")).toBe(true);
+		} finally {
+			state.close();
+		}
+		const reader = new Database(join(own, "state.sqlite"), { readonly: true });
+		try {
+			// Both rows carry the first tick: the transaction shares one stamp across its writes.
+			expect(
+				reader
+					.query<{ dormant_at: string }, [string]>(
+						"SELECT dormant_at FROM dormant WHERE memory_id = ?",
+					)
+					.get("m5")?.dormant_at,
+			).toBe("2026-01-01T00:00:00.000Z");
+			expect(
+				reader
+					.query<{ scope: string; at: string }, [string]>(
+						"SELECT scope, at FROM promotions WHERE memory_id = ?",
+					)
+					.get("m5"),
+			).toEqual({ scope: "generic", at: "2026-01-01T00:00:00.000Z" });
+		} finally {
+			reader.close();
+		}
 	} finally {
-		reader.close();
+		rmSync(own, { recursive: true, force: true });
 	}
 });
 

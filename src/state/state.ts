@@ -197,11 +197,14 @@ export class LocalState {
 		this.database.query("DELETE FROM dormant WHERE memory_id = ?").run(memoryId);
 	}
 
-	/** Remembers an applied promotion; a memory with a row is never proposed again. */
-	recordPromotion(memoryId: string, scope: string): void {
+	/**
+	 * Remembers an applied promotion; a memory with a row is never proposed again. `at` is
+	 * the clock's stamp unless the caller shares one (markPromoted does, inside its transaction).
+	 */
+	recordPromotion(memoryId: string, scope: string, at: string = this.clock().toISOString()): void {
 		this.database
 			.query("INSERT OR IGNORE INTO promotions (memory_id, scope, at) VALUES (?, ?, ?)")
-			.run(memoryId, scope, this.clock().toISOString());
+			.run(memoryId, scope, at);
 	}
 
 	isPromoted(memoryId: string): boolean {
@@ -212,7 +215,8 @@ export class LocalState {
 
 	/**
 	 * Marks the original dormant and records its promotion as one write at one timestamp, so a
-	 * crash between the two cannot leave it dormant but unrecorded (`dmn rest --apply`).
+	 * crash between the two cannot leave it dormant but unrecorded (`dmn rest --apply`). Built
+	 * from recordPromotion with the stamp shared across the transaction's two writes.
 	 */
 	markPromoted(memoryId: string, scope: string): void {
 		const at = this.clock().toISOString();
@@ -220,9 +224,7 @@ export class LocalState {
 			this.database
 				.query("INSERT OR IGNORE INTO dormant (memory_id, dormant_at) VALUES (?, ?)")
 				.run(memoryId, at);
-			this.database
-				.query("INSERT OR IGNORE INTO promotions (memory_id, scope, at) VALUES (?, ?, ?)")
-				.run(memoryId, scope, at);
+			this.recordPromotion(memoryId, scope, at);
 		})();
 	}
 
