@@ -11,7 +11,10 @@ export interface Judgement {
 	level: number;
 }
 
-/** Store-agnostic usefulness judge: one `Judgement` per input memory, in input order. */
+/**
+ * Store-agnostic usefulness judge: a `Judgement` per input memory it could answer, in input
+ * order. An input the service refused (a per-item error) is absent from the result.
+ */
 export interface Judge {
 	judge(prompt: string, memories: JudgeMemory[]): Promise<Judgement[]>;
 }

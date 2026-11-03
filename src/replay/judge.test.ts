@@ -99,17 +99,39 @@ test("a new threshold reuses stored answers: no calls, useful flips", async () =
 
 test("a judge failure keeps what was answered and a re-run resumes", async () => {
 	let calls = 0;
+	let onDisk = -1;
 	const flaky: Judge = {
 		async judge(prompt, memories) {
 			calls += 1;
-			if (calls === 2) throw new Error("402 out of credit");
+			// A run killed here must already have prompt 1 on disk.
+			if (calls === 2) {
+				onDisk = read("judgements.json").filter((e: { judge?: unknown }) => e.judge).length;
+				throw new Error("402 out of credit");
+			}
 			return new FakeJudge().judge(prompt, memories);
 		},
 	};
 	const first = await judgeRun(directory, flaky, 0.5);
 	expect(first.judged).toBe(3);
+	expect(onDisk).toBe(3);
 	expect(first.error?.message).toBe("402 out of credit");
 	const resumed = new FakeJudge();
 	expect(await judgeRun(directory, resumed, 0.5)).toEqual({ judged: 4, total: 7 });
 	expect(resumed.judged).toBe(1);
+});
+
+test("a prompt the service only partly answered does not stop the run", async () => {
+	const partial: Judge = {
+		async judge(prompt, memories) {
+			const all = await new FakeJudge().judge(prompt, memories);
+			// Prompt 1 asks about a and b; the service refuses b.
+			return all.filter((judgement) => judgement.id !== "b");
+		},
+	};
+	expect(await judgeRun(directory, partial, 0.5)).toEqual({ judged: 3, total: 7 });
+	const entries = read("judgements.json");
+	expect(entries[1].judge).toBeUndefined();
+	expect(entries[1].useful).toBeNull();
+	// Prompt 2 was still judged after prompt 1 came back short.
+	expect(entries[3].judge).toBeDefined();
 });

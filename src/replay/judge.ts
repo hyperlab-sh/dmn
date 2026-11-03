@@ -26,7 +26,7 @@ function readTexts(path: string): Record<string, string> {
 }
 
 /** The report with ` P(useful)=0.xx` right after the id of every shown memory that has one. */
-export function annotateReport(report: string, judgements: Judgement[]): string {
+function annotateReport(report: string, judgements: Judgement[]): string {
 	const probability = new Map<string, number>();
 	for (const entry of judgements) {
 		if (entry.judge)
