@@ -81,7 +81,10 @@ function toMentalModel(wire: WireMentalModel): MentalModel | null {
 }
 
 function toRecord(wire: WireMemory): MemoryRecord {
-	const createdAt = wire.created_at ?? wire.date ?? wire.mentioned_at ?? wire.occurred_start;
+	// The content time the item was retained with: `date` on list/get, `mentioned_at` on recall
+	// (this Hindsight answers recall without `date`); `created_at` is the ingest time, kept as a
+	// fallback for answers that carry neither, then the remaining stamps as before.
+	const createdAt = wire.date ?? wire.mentioned_at ?? wire.created_at ?? wire.occurred_start;
 	if (!createdAt) throw new StoreError(`memory ${wire.id} has no timestamp`, 0);
 	const record: MemoryRecord = {
 		id: wire.id,
@@ -156,6 +159,7 @@ export class HindsightStore implements MemoryStore {
 			...(item.context !== undefined && { context: item.context }),
 			...(item.metadata !== undefined && { metadata: item.metadata }),
 			...(item.documentId !== undefined && { document_id: item.documentId }),
+			...(item.timestamp !== undefined && { timestamp: item.timestamp }),
 		}));
 		await this.request(
 			"POST",

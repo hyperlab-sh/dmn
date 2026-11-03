@@ -70,7 +70,8 @@ export class FakeStore implements MemoryStore {
 				id: `00000000-0000-4000-8000-${String(this.counter).padStart(12, "0")}`,
 				text: item.content,
 				tags: [...item.tags],
-				createdAt: this.clock().toISOString(),
+				// The content time when the item carries one, else the clock (the ingest time).
+				createdAt: item.timestamp ?? this.clock().toISOString(),
 			};
 			if (item.context !== undefined) record.context = item.context;
 			if (item.metadata !== undefined) record.metadata = { ...item.metadata };
@@ -199,6 +200,8 @@ interface RetainBody {
 		tags?: string[];
 		context?: string;
 		metadata?: Record<string, string>;
+		document_id?: string;
+		timestamp?: string;
 	}[];
 }
 
@@ -264,6 +267,8 @@ export function startFakeServer(options?: {
 						tags: item.tags ?? [],
 						...(item.context !== undefined && { context: item.context }),
 						...(item.metadata !== undefined && { metadata: item.metadata }),
+						...(item.document_id !== undefined && { documentId: item.document_id }),
+						...(item.timestamp !== undefined && { timestamp: item.timestamp }),
 					})),
 				);
 				return Response.json({

@@ -7,7 +7,7 @@ import { FakeJudge } from "../judge/fake.js";
 import { LocalState } from "../state/state.js";
 import type { FakeStore } from "../store/fake.js";
 import { readManifests } from "./manifests.js";
-import { type Judgement, RunExistsError, writeReport } from "./report.js";
+import { type Judgement, RunExistsError, readRunTop, writeReport } from "./report.js";
 import { readSeedMemories, runReplay, seedFakeStore } from "./run.js";
 import { promptsFrom } from "./transcript.js";
 
@@ -221,6 +221,30 @@ test("a run without a judge has no third list", async () => {
 	expect(readFileSync(join(directory, "report.md"), "utf8")).not.toContain("activation+judge");
 	expect(readFileSync(join(directory, "judgements.json"), "utf8")).not.toContain(
 		"activation+judge",
+	);
+});
+
+test("an as-live result writes the mode header rows after top, and readRunTop still parses", async () => {
+	const directory = join(scratch, "as-live");
+	writeReport(
+		{
+			...(await replay()),
+			live: { uses: "judged", measureFrom: "2026-01-03T12:00:00.000Z", seeded: 4 },
+		},
+		directory,
+	);
+	const report = readFileSync(join(directory, "report.md"), "utf8");
+	expect(report).toContain(
+		"top: 5\nmode: as-live\nuses: judged\nmeasure-from: 2026-01-03T12:00:00.000Z\nseeded: 4",
+	);
+	expect(readRunTop(directory)).toBe(5);
+	// A run without a cut says none.
+	writeReport(
+		{ ...(await replay()), live: { uses: "none", measureFrom: null, seeded: 0 } },
+		join(scratch, "as-live-uncut"),
+	);
+	expect(readFileSync(join(scratch, "as-live-uncut", "report.md"), "utf8")).toContain(
+		"uses: none\nmeasure-from: none\nseeded: 0",
 	);
 });
 

@@ -131,3 +131,14 @@ test("a classify call that outlives its deadline costs the tags, not the retenti
 	expect(errors[0]).toBeInstanceOf(JudgeError);
 	expect((errors[0] as Error).message).toContain("deadline");
 });
+
+test("every retained item carries the content time: timestamp is now, not the ingest clock", async () => {
+	const clock = new Date("2026-02-01T00:00:00Z");
+	const store = new FakeStore(() => new Date("2020-01-01T00:00:00Z"));
+	await retainTurns(store, cue, [turns[0] ?? { role: "user", text: learningText }], { now: clock });
+	const items = await retained(store);
+	expect(items).toHaveLength(1);
+	// The wire item's timestamp is the given now; a store that honours it backdates the memory
+	// instead of stamping it at its own clock.
+	expect(items[0]?.createdAt).toBe("2026-02-01T00:00:00.000Z");
+});

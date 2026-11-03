@@ -70,7 +70,17 @@ export function renderSummary(scores?: Scores): string {
 /** Writes `report.md`, the judgements skeleton (`useful: null`) and the texts `replay judge` needs. */
 export function writeReport(result: ReplayResult, directory: string): void {
 	if (existsSync(directory)) throw new RunExistsError(directory);
-	const lines = [`# dmn replay ${result.run}`, "", `top: ${result.top}`, ""];
+	const lines = [`# dmn replay ${result.run}`, "", `top: ${result.top}`];
+	// The as-live header rows: `score` reads only `top:` and ignores the rest.
+	if (result.live) {
+		lines.push(
+			`mode: as-live`,
+			`uses: ${result.live.uses}`,
+			`measure-from: ${result.live.measureFrom ?? "none"}`,
+			`seeded: ${result.live.seeded}`,
+		);
+	}
+	lines.push("");
 	const judgements: Judgement[] = [];
 	const memories: Record<string, string> = {};
 	const prompts: Record<string, string> = {};

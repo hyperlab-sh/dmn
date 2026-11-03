@@ -7,9 +7,11 @@ import {
 	readdirSync,
 	readFileSync,
 	rmSync,
+	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { run as runReplayCommand } from "./replay.js";
 
 const root = new URL("../../..", import.meta.url).pathname;
 let scratch: string;
@@ -56,6 +58,69 @@ beforeAll(() => {
 	base = join(out, readdirSync(out)[0] as string);
 });
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+
+/** Calls the command in-process, capturing what it writes to stderr (no spawn needed). */
+async function inProcess(args: string[]): Promise<{ code: number; stderr: string }> {
+	const original = process.stderr.write.bind(process.stderr);
+	let stderr = "";
+	process.stderr.write = ((chunk: string | Uint8Array) => {
+		stderr += chunk;
+		return true;
+	}) as typeof process.stderr.write;
+	try {
+		const code = await runReplayCommand(args);
+		return { code, stderr };
+	} finally {
+		process.stderr.write = original;
+	}
+}
+
+test("--as-live exits 2 for a bad flag combination and a bad --measure-from, before any run", async () => {
+	const transcripts = ["fixtures/replay/session-a.jsonl", "fixtures/replay/session-b.jsonl"];
+	const noJudge = await inProcess(["--as-live", "--store", "fake", ...transcripts]);
+	expect(noJudge.code).toBe(2);
+	expect(noJudge.stderr).toContain("--as-live --uses judged needs --judge");
+
+	const badDate = await inProcess([
+		"--as-live",
+		"--store",
+		"fake",
+		"--judge",
+		"fake",
+		"--measure-from",
+		"not-a-date",
+		...transcripts,
+	]);
+	expect(badDate.code).toBe(2);
+	expect(badDate.stderr).toContain("--measure-from is not a date");
+
+	const strayFlag = await inProcess(["--store", "fake", "--uses", "none", ...transcripts]);
+	expect(strayFlag.code).toBe(2);
+	expect(strayFlag.stderr).toContain("--uses and --measure-from need --as-live");
+});
+
+test("--as-live exits 2 naming the file and index of a prompt without a timestamp", async () => {
+	const untimed = join(scratch, "untimed.jsonl");
+	writeFileSync(
+		untimed,
+		`${JSON.stringify({
+			type: "user",
+			cwd: "/home/dev/acme/widgets",
+			message: { role: "user", content: "a prompt with no timestamp line" },
+		})}\n`,
+	);
+	const { code, stderr } = await inProcess([
+		"--as-live",
+		"--store",
+		"fake",
+		"--judge",
+		"fake",
+		untimed,
+	]);
+	expect(code).toBe(2);
+	// The file and the prompt's index, before anything is retained.
+	expect(stderr).toContain("untimed.jsonl: prompt 0 has no timestamp");
+});
 
 test("replay writes the report and judgements, then score fills the summary", () => {
 	expect(baseRun).toEqual({ exitCode: 0, stderr: "" });

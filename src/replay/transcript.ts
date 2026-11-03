@@ -10,6 +10,10 @@ export interface ReplayPrompt {
 	activeSkill?: string | undefined;
 	/** Timestamp of the prompt line, or an empty string when it has none. */
 	at: string;
+	/** The assistant text that follows the prompt; set by `orderPrompts`, not `promptsFrom`. */
+	answer?: string;
+	/** The transcript's basename; set by `orderPrompts`, not `promptsFrom`. */
+	file?: string;
 }
 
 interface Line {
@@ -75,17 +79,30 @@ function toolEntries(content: unknown): { tools: string[]; skill?: string } {
 	return skill === undefined ? { tools } : { tools, skill };
 }
 
+/** One accepted prompt with the assistant text that follows it, from a single walk. */
+interface WalkedPrompt {
+	prompt: ReplayPrompt;
+	answer: string;
+}
+
 /**
- * The user prompts of a Claude Code transcript with what the cue needs: the recorded cwd, the
- * tools used since the previous prompt, and the latest slash command or `Skill` call.
- * A slash command's arguments are its prompt; a bare command, tool results, meta, compact-summary,
- * sidechain and shell lines are not prompts.
+ * The prompts of a Claude Code transcript with what the cue needs, each paired with the
+ * assistant text that follows it: the recorded cwd, the tools used since the previous prompt,
+ * the latest slash command or `Skill` call, and the answer the Stop hook would have retained.
+ * A slash command's arguments are its prompt; a bare command, tool results, meta,
+ * compact-summary, sidechain and shell lines are not prompts.
  */
-export function promptsFrom(path: string): ReplayPrompt[] {
-	const prompts: ReplayPrompt[] = [];
+function walkPrompts(path: string): WalkedPrompt[] {
+	const walked: WalkedPrompt[] = [];
+	let current: { prompt: ReplayPrompt; answerParts: string[] } | undefined;
 	let recentTools: string[] = [];
 	let activeSkill: string | undefined;
 	let cwd = "";
+	const close = () => {
+		if (!current) return;
+		walked.push({ prompt: current.prompt, answer: current.answerParts.join("\n\n") });
+		current = undefined;
+	};
 	for (const line of parseLines(path)) {
 		// A subagent's thread: its tools and cwd say nothing about the user's next prompt.
 		if (line.isSidechain) continue;
@@ -95,6 +112,10 @@ export function promptsFrom(path: string): ReplayPrompt[] {
 			const found = toolEntries(content);
 			recentTools.push(...found.tools);
 			if (found.skill) activeSkill = found.skill;
+			// What the assistant said after the prompt so far is this prompt's answer, as the
+			// Stop hook's `lastTurns` reads it: text blocks only, entries joined by a blank line.
+			const said = typedText(content);
+			if (current && said.trim()) current.answerParts.push(said);
 			continue;
 		}
 		if (line.type !== "user" || line.isMeta) continue;
@@ -109,15 +130,38 @@ export function promptsFrom(path: string): ReplayPrompt[] {
 		if (!text.trim() || ignoredPrefixes.some((prefix) => text.trimStart().startsWith(prefix))) {
 			continue;
 		}
-		prompts.push({
-			index: prompts.length,
-			text,
-			cwd,
-			recentTools,
-			...(activeSkill ? { activeSkill } : {}),
-			at: typeof line.timestamp === "string" ? line.timestamp : "",
-		});
+		close();
+		current = {
+			prompt: {
+				index: walked.length,
+				text,
+				cwd,
+				recentTools,
+				...(activeSkill ? { activeSkill } : {}),
+				at: typeof line.timestamp === "string" ? line.timestamp : "",
+			},
+			answerParts: [],
+		};
 		recentTools = [];
 	}
-	return prompts;
+	close();
+	return walked;
+}
+
+/**
+ * The user prompts of a Claude Code transcript with what the cue needs: the recorded cwd, the
+ * tools used since the previous prompt, and the latest slash command or `Skill` call.
+ * See `walkPrompts` for what counts as a prompt.
+ */
+export function promptsFrom(path: string): ReplayPrompt[] {
+	return walkPrompts(path).map(({ prompt }) => prompt);
+}
+
+/**
+ * The assistant text that follows each prompt of a transcript, by prompt index: what the Stop
+ * hook would have retained beside the prompt. Aligned with `promptsFrom` by construction (one
+ * walk); entries after a prompt end at the next prompt.
+ */
+export function answersFrom(path: string): string[] {
+	return walkPrompts(path).map(({ answer }) => answer);
 }

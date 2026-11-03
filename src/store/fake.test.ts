@@ -121,6 +121,25 @@ test("a wrong base URL is an error for list and listTags, not an empty store", a
 	await expect(wrong.listTags(bank)).rejects.toBeInstanceOf(StoreError);
 });
 
+test("retain stamps createdAt with the item's content time, falling back to the clock", async () => {
+	let stamp = new Date("2026-06-01T00:00:00Z");
+	const store = new FakeStore(() => stamp);
+	await store.retain("org-acme", [
+		{
+			content: "a replayed turn from months ago",
+			tags: [],
+			timestamp: "2026-01-02T09:00:00.000Z",
+		},
+		{ content: "a live turn stamped now", tags: [] },
+	]);
+	stamp = new Date("2026-06-02T00:00:00Z");
+	const records = await store.list("org-acme", { limit: 10, offset: 0 });
+	expect(records.map((record) => record.createdAt)).toEqual([
+		"2026-01-02T09:00:00.000Z",
+		"2026-06-01T00:00:00.000Z",
+	]);
+});
+
 test("mental models: create and refresh build content from the role's memories; list maps them", async () => {
 	let stamp = new Date("2026-06-01T00:00:00Z");
 	const roster = new FakeStore(() => stamp);

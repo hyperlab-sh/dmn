@@ -1,0 +1,6 @@
+{"type":"user","cwd":"/home/dev/acme/widgets","timestamp":"2026-01-02T09:00:00.000Z","message":{"role":"user","content":"The widgets parser must reject trailing commas"}}
+{"type":"assistant","cwd":"/home/dev/acme/widgets","timestamp":"2026-01-02T09:00:30.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Done: the widgets parser rejects trailing commas now"}]}}
+{"type":"user","cwd":"/home/dev/acme/widgets","timestamp":"2026-01-02T10:00:00.000Z","message":{"role":"user","content":"How do I run the widgets parser tests?"}}
+{"type":"assistant","cwd":"/home/dev/acme/widgets","timestamp":"2026-01-02T10:00:30.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Run them with bun test from the package root"}]}}
+{"type":"user","cwd":"/home/dev/acme/widgets","timestamp":"2026-01-03T11:00:00.000Z","message":{"role":"user","content":"Why does the widgets parser build fail?"}}
+{"type":"assistant","cwd":"/home/dev/acme/widgets","timestamp":"2026-01-03T11:00:30.000Z","message":{"role":"assistant","content":[{"type":"text","text":"The build fails because the grammar fixture is stale"}]}}
