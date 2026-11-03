@@ -5,14 +5,15 @@ import type { MemoryStore, TagCount } from "../store/types.js";
  * Memories per tag, summed over `banks`. Per-bank counts come from `state.tagFanCache` while
  * younger than `ttlSeconds`, otherwise from `store.listTags`. The TTL follows `state`'s clock,
  * so a caller that injects time must build `LocalState` with the same clock.
- * A bank whose `listTags` fails contributes nothing: fan counts only sharpen the ranking,
- * so a store hiccup must not cost the whole recall.
+ * A bank whose `listTags` fails contributes nothing (and is reported to `onError`): fan counts
+ * only sharpen the ranking, so a store hiccup must not cost the whole recall.
  */
 export async function fanCounts(
 	store: Pick<MemoryStore, "listTags">,
 	state: LocalState,
 	banks: ReadonlyArray<string>,
 	ttlSeconds: number,
+	onError?: (bank: string, error: unknown) => void,
 ): Promise<Map<string, number>> {
 	const perBank = await Promise.all(
 		banks.map(async (bank): Promise<TagCount[]> => {
@@ -22,7 +23,8 @@ export async function fanCounts(
 				const fresh = await store.listTags(bank);
 				state.tagFanCache.write(bank, fresh);
 				return fresh;
-			} catch {
+			} catch (error) {
+				onError?.(bank, error);
 				return [];
 			}
 		}),

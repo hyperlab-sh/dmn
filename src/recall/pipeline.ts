@@ -13,6 +13,8 @@ export interface RecallInput {
 	cue: Cue;
 	/** The user's prompt; the cue's phrase stands in when there is none. */
 	prompt?: string | undefined;
+	/** Called when a bank's tag counts cannot be fetched; recall carries on without them. */
+	onFanError?: (bank: string, error: unknown) => void;
 	random?: () => number;
 	now?: Date;
 }
@@ -26,6 +28,7 @@ export async function recall({
 	config,
 	cue,
 	prompt,
+	onFanError,
 	random = Math.random,
 	now = new Date(),
 }: RecallInput): Promise<RankedMemory[]> {
@@ -38,7 +41,7 @@ export async function recall({
 	};
 	const [perBank, fans] = await Promise.all([
 		Promise.all(banks.map((bank) => store.recall(bank, query))),
-		fanCounts(store, state, banks, config.fanCacheSeconds),
+		fanCounts(store, state, banks, config.fanCacheSeconds, onFanError),
 	]);
 	const seen = new Set<string>();
 	const candidates: MemoryRecord[] = [];
