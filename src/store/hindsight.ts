@@ -73,6 +73,15 @@ function toRecord(wire: WireMemory): MemoryRecord {
 	return record;
 }
 
+/** Hindsight answers 404 "Bank '<name>' not found" for a bank nobody has written to yet. */
+function isBankNotFound(error: unknown): boolean {
+	return (
+		error instanceof StoreError &&
+		error.status === 404 &&
+		/failed: 404 [\s\S]*bank/i.test(error.message)
+	);
+}
+
 /** Hindsight over its REST API with plain `fetch`; no SDK, no runtime dependency. */
 export class HindsightStore implements MemoryStore {
 	private readonly baseUrl: string;
@@ -137,12 +146,17 @@ export class HindsightStore implements MemoryStore {
 		if (query.tags !== undefined) body.tags = query.tags;
 		if (query.tagsMatch !== undefined) body.tags_match = query.tagsMatch;
 		if (query.queryTimestamp !== undefined) body.query_timestamp = query.queryTimestamp;
-		const response = await this.request<{ results: WireMemory[] }>(
-			"POST",
-			this.url(bank, "/memories/recall"),
-			body,
-		);
-		return response.results.slice(0, query.topK).map(toRecord);
+		try {
+			const response = await this.request<{ results: WireMemory[] }>(
+				"POST",
+				this.url(bank, "/memories/recall"),
+				body,
+			);
+			return response.results.slice(0, query.topK).map(toRecord);
+		} catch (error) {
+			if (isBankNotFound(error)) return [];
+			throw error;
+		}
 	}
 
 	async get(bank: string, id: string): Promise<MemoryRecord | null> {
@@ -153,7 +167,10 @@ export class HindsightStore implements MemoryStore {
 			);
 			return toRecord(wire);
 		} catch (error) {
-			if (error instanceof StoreError && error.status === 404) return null;
+			// 404: unknown id. 400: an id Hindsight cannot parse, so it cannot exist either.
+			if (error instanceof StoreError && (error.status === 404 || error.status === 400)) {
+				return null;
+			}
 			throw error;
 		}
 	}
@@ -165,11 +182,16 @@ export class HindsightStore implements MemoryStore {
 		params.set("tags_match", "any_strict");
 		params.set("limit", String(query.limit));
 		params.set("offset", String(query.offset));
-		const response = await this.request<{ items: WireMemory[] }>(
-			"GET",
-			this.url(bank, "/memories/list", params),
-		);
-		return response.items.map(toRecord);
+		try {
+			const response = await this.request<{ items: WireMemory[] }>(
+				"GET",
+				this.url(bank, "/memories/list", params),
+			);
+			return response.items.map(toRecord);
+		} catch (error) {
+			if (isBankNotFound(error)) return [];
+			throw error;
+		}
 	}
 
 	async listTags(bank: string): Promise<TagCount[]> {
@@ -181,13 +203,7 @@ export class HindsightStore implements MemoryStore {
 				page = await this.request("GET", this.url(bank, "/tags", params));
 			} catch (error) {
 				// A bank nobody has written to yet has no tags; any other 404 is a wrong URL.
-				if (
-					error instanceof StoreError &&
-					error.status === 404 &&
-					/failed: 404 [\s\S]*bank/i.test(error.message)
-				) {
-					return [];
-				}
+				if (isBankNotFound(error)) return [];
 				throw error;
 			}
 			for (const item of page.items) tags.push({ tag: item.tag, count: item.count });
