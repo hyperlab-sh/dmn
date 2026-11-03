@@ -1,0 +1,73 @@
+{
+	"name": "@hyperlab.sh/dmn",
+	"version": "0.0.0",
+	"type": "module",
+	"description": "Default Mode Network: human-like memory for coding agents — layered recall, forgetting, reinforcement and intrusive thoughts",
+	"keywords": [
+		"agent-memory",
+		"claude-code",
+		"act-r",
+		"memory",
+		"recall",
+		"forgetting",
+		"spreading-activation",
+		"hindsight",
+		"llm",
+		"ai-agents"
+	],
+	"author": "Saulo Vallory <me@saulo.engineer> (https://github.com/svallory)",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/hyperlab-sh/dmn.git"
+	},
+	"homepage": "https://github.com/hyperlab-sh/dmn#readme",
+	"bugs": {
+		"url": "https://github.com/hyperlab-sh/dmn/issues"
+	},
+	"engines": {
+		"node": ">=20",
+		"bun": ">=1.2"
+	},
+	"bin": {
+		"dmn": "./dist/cli/index.js"
+	},
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE",
+		"CHANGELOG.md"
+	],
+	"scripts": {
+		"build": "tsup",
+		"test": "bun test",
+		"typecheck": "tsc --noEmit",
+		"lint": "biome check .",
+		"format": "biome check --write .",
+		"lint:package": "publint",
+		"changeset": "changeset",
+		"version": "changeset version",
+		"release": "bun run build && changeset publish",
+		"prepublishOnly": "bun run build",
+		"prepare": "lefthook install -f"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.5.14",
+		"@changesets/changelog-github": "^0.5.1",
+		"@changesets/cli": "^2.29.5",
+		"@types/bun": "^1.2.0",
+		"@types/node": "^22.0.0",
+		"lefthook": "^2.1.4",
+		"publint": "^0.3.12",
+		"tsup": "^8.5.0",
+		"typescript": "^5.9.0"
+	}
+}

@@ -1,0 +1,30 @@
+name: Bug report
+description: Something recalled, forgot or injected the wrong thing
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened
+      description: What dmn did, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps. If it is a bad recall, include the cue (cwd, skill, task) and the memory that was or was not injected.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: dmn version
+      description: Output of `dmn --version`
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Bun/Node version, Claude Code version, memory store and version.
