@@ -176,13 +176,16 @@ test("user-prompt injects, and prints nothing when no memory matches", async () 
 });
 
 test("stop retains both turns kind-tagged by the judge, with the cue's tags, and counts no uncited or unknown memory", async () => {
+	// Baselines, so this test passes whatever ran before it: only the delta is this test's.
+	const callsBefore = judgeCalls;
+	const statesBefore = judgeStates.length;
 	const judged = await run("stop", "stop.json", {
 		judge: { provider: "laya", baseUrl: server.url },
 	});
 	expect(judged).toMatchObject({ stdout: "", exitCode: 0, stderr: "" });
 	// One batch call classified both retained texts.
-	expect(judgeCalls).toBe(1);
-	expect(judgeStates).toHaveLength(2);
+	expect(judgeCalls - callsBefore).toBe(1);
+	expect(judgeStates.slice(statesBefore)).toHaveLength(2);
 	const turns = (await store.list(bankFor("acme"), { limit: 20, offset: 0 })).filter((memory) =>
 		memory.tags.some((tag) => tag.startsWith("kind:")),
 	);
@@ -221,6 +224,7 @@ test("a memory cited at stop ranks above the others on the next prompt", async (
 	const before = await order(run("user-prompt", "user-prompt.json"));
 	const target = ids["Sync worker retries are capped at five attempts."] as string;
 	const transcript = transcriptFor("cited.jsonl", `As [m:${target}] says.`);
+	const callsBefore = judgeCalls;
 	// This stop runs laya without a key: Stop never fails because of the judge — it warns and
 	// retains kind:turn instead, and the judge stub is asked nothing.
 	const noKey = await run("stop", "stop.json", {
@@ -230,14 +234,13 @@ test("a memory cited at stop ranks above the others on the next prompt", async (
 	});
 	expect(noKey.exitCode).toBe(0);
 	expect(noKey.stderr).toContain("LAYA_API_KEY");
-	expect(judgeCalls).toBe(1);
+	expect(judgeCalls).toBe(callsBefore);
 	const after = await order(run("user-prompt", "user-prompt.json"));
-	// Pinned: under DMN_SEED and DMN_NOW the cited memory starts second.
-	expect(before).toEqual([
-		ids["Retry delays in the sync worker use jitter."],
-		target,
-		ids["The sync worker logs every retry delay."],
-	]);
+	// All three seeded memories surface and the cited one is not yet on top; its exact starting
+	// place follows the seed and the bank's contents (earlier tests may have retained more), so
+	// only the lift the citation buys is pinned.
+	expect(new Set(before)).toEqual(seeded);
+	expect(before[0]).not.toBe(target);
 	expect(after[0]).toBe(target);
 	// Use stamps follow DMN_NOW, the same clock recall ranks with.
 	const state = new LocalState({ directory: join(scratch, "state", "dmn") });
@@ -263,13 +266,14 @@ test("stop records a co-use edge for two cited memories once, and none for one",
 		});
 	}
 	// The last stop runs provider none with a key exported: the stub is asked nothing.
+	const callsBefore = judgeCalls;
 	const off = await run("stop", "stop.json", {
 		transcript: one,
 		stateHome,
 		judge: { provider: "none", baseUrl: server.url },
 	});
 	expect(off.exitCode).toBe(0);
-	expect(judgeCalls).toBe(1);
+	expect(judgeCalls).toBe(callsBefore);
 	const state = new LocalState({ directory: join(stateHome, "dmn") });
 	try {
 		const [low, high] = [a, b].sort() as [string, string];
