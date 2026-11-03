@@ -55,6 +55,7 @@ test("returns the documented defaults when config.json is absent", () => {
 		stateDir: "/home/test/.local/state/dmn",
 		storeTimeoutMs: 2000,
 		retainTimeoutMs: 60_000,
+		fanCacheSeconds: 300,
 		activation: { ...defaultActivationParameters },
 	});
 });

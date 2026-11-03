@@ -28,6 +28,7 @@ export interface Config {
 	stateDir: string;
 	storeTimeoutMs: number;
 	retainTimeoutMs: number;
+	fanCacheSeconds: number;
 	activation: ActivationParameters;
 }
 
@@ -46,6 +47,7 @@ const numberKeys = [
 	"dormancyFloor",
 	"storeTimeoutMs",
 	"retainTimeoutMs",
+	"fanCacheSeconds",
 ] as const;
 
 function xdgDirectory(env: LoadConfigOptions["env"], variable: string, fallback: string): string {
@@ -108,6 +110,7 @@ export function loadConfig(options: LoadConfigOptions): Config {
 		stateDir: xdgDirectory(env, "XDG_STATE_HOME", ".local/state"),
 		storeTimeoutMs: 2000,
 		retainTimeoutMs: 60_000,
+		fanCacheSeconds: 300,
 		activation: { ...defaultActivationParameters },
 	};
 

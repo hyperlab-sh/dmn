@@ -55,7 +55,7 @@ export function baseLevelActivation(
 /**
  * A cue the current context shares with the memory being scored. `fan` is the
  * number of memories that cue is linked to. A cue linked to everything
- * (`org:mosaic`) has a high fan and spreads almost nothing; a specific cue
+ * (`org:acme`) has a high fan and spreads almost nothing; a specific cue
  * (`stack:marko`) spreads a lot. This is the fan effect, and it is what keeps
  * a broad context from lighting up every memory it contains.
  */

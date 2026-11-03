@@ -11,6 +11,10 @@ export type { Config, LoadConfigOptions } from "./config/config.js";
 export { ConfigError, createStore, loadConfig, openState } from "./config/config.js";
 export type { Cue, CueInput } from "./cue/cue.js";
 export { buildCue, softTags } from "./cue/cue.js";
+export { formatInjection } from "./recall/inject.js";
+export { recall } from "./recall/pipeline.js";
+export type { RankedMemory } from "./recall/rerank.js";
+export { rerank } from "./recall/rerank.js";
 // Type-only: the value pulls in `bun:sqlite`, which Node cannot load. Use `openState`.
 export type { LocalState, LocalStateOptions, MemoryUses } from "./state/state.js";
 export type { HindsightOptions } from "./store/hindsight.js";
