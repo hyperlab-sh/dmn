@@ -85,3 +85,23 @@ test("age falls back to the state's firstSeenAt when the record has no createdAt
 	});
 	expect(ranked?.baseLevel).toBeLessThan(fresh?.baseLevel ?? 0);
 });
+
+test("components for one candidate match hand-computed values", () => {
+	const [ranked] = rerank([memory("x", daysAgo(5), [])], cue, new Map(), {
+		state: stateWith({}),
+		random: middle,
+		now,
+	});
+	// B = ln(1 / 0.5) - 0.5 * ln(120 hours), no shared tags, random 0.5 gives zero noise.
+	expect(ranked?.baseLevel).toBeCloseTo(Math.log(2) - 0.5 * Math.log(120), 10);
+	expect(ranked?.spreading).toBe(0);
+	expect(ranked?.noise).toBe(0);
+	expect(ranked?.activation).toBeCloseTo(ranked?.baseLevel ?? Number.NaN, 10);
+});
+
+test("an unparseable createdAt falls back to firstSeenAt", () => {
+	const options = { state: stateWith({}, { x: daysAgo(100) }), random: middle, now };
+	const [bad] = rerank([memory("x", "not a date", [])], cue, new Map(), options);
+	const [good] = rerank([memory("x", daysAgo(100), [])], cue, new Map(), options);
+	expect(bad?.baseLevel).toBeCloseTo(good?.baseLevel ?? Number.NaN, 10);
+});

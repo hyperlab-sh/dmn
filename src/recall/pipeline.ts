@@ -17,7 +17,9 @@ export interface RecallInput {
 	now?: Date;
 }
 
-/** Candidates from the cue's organization bank and `generic`, minus dormant, ranked by activation. */
+/**
+ * Async because the store is: callers must await it.
+ * Candidates from the cue's organization bank and `generic`, minus dormant, ranked by activation. */
 export async function recall({
 	store,
 	state,
@@ -36,7 +38,7 @@ export async function recall({
 	};
 	const [perBank, fans] = await Promise.all([
 		Promise.all(banks.map((bank) => store.recall(bank, query))),
-		fanCounts(store, state, banks, now, config.fanCacheSeconds),
+		fanCounts(store, state, banks, config.fanCacheSeconds),
 	]);
 	const seen = new Set<string>();
 	const candidates: MemoryRecord[] = [];
