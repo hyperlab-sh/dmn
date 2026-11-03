@@ -8,6 +8,8 @@ Usage:
   dmn --version
   dmn install [--settings <path>]   add the Claude Code hooks (default ~/.claude/settings.json)
   dmn hook <session-start|user-prompt|post-tool|stop>   run by Claude Code, reads the event on stdin
+  dmn sweep [--bank <b>...] [--dry-run]   mark unused, unprotected memories dormant
+  dmn sweep --revive <id>   clear a memory's dormancy
   dmn help
   dmn replay <transcript.jsonl>... | dmn replay score <run-dir>
 
@@ -32,6 +34,9 @@ switch (command) {
 		break;
 	case "hook":
 		process.exitCode = await runHook(rest[0], process.env);
+		break;
+	case "sweep":
+		process.exitCode = await (await import("./commands/sweep.js")).runSweep(rest, process.env);
 		break;
 	case "install":
 		process.exitCode = runInstall(rest, process.env);
