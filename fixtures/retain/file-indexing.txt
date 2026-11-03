@@ -1,0 +1,14 @@
+src/api/routes/users.ts
+src/api/routes/teams.ts
+src/api/routes/billing.ts
+src/api/middleware/auth.ts
+src/api/middleware/cors.ts
+src/lib/db/client.ts
+src/lib/db/migrations/001_init.sql
+src/lib/db/migrations/002_teams.sql
+src/web/src/app.tsx
+src/web/src/pages/home.tsx
+src/web/src/pages/settings.tsx
+src/package.json
+src/tsconfig.json
+src/README.md

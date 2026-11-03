@@ -15,6 +15,9 @@ export { formatInjection } from "./recall/inject.js";
 export { recall } from "./recall/pipeline.js";
 export type { RankedMemory } from "./recall/rerank.js";
 export { rerank } from "./recall/rerank.js";
+export type { RetainVerdict, Turn } from "./retain/filter.js";
+export { shouldRetain } from "./retain/filter.js";
+export { extractUses } from "./retain/uses.js";
 // Type-only: the value pulls in `bun:sqlite`, which Node cannot load. Use `openState`.
 export type { LocalState, LocalStateOptions, MemoryUses } from "./state/state.js";
 export type { HindsightOptions } from "./store/hindsight.js";

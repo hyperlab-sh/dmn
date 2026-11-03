@@ -1,0 +1,1 @@
+Use a delay of base * 2 ** attempt, capped at a maximum, and add jitter so workers do not retry in step. The retry helper in the sync worker is the right place for it.
