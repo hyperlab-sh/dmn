@@ -49,6 +49,9 @@ export async function runHook(
 		if (event.name !== expected) {
 			throw new HookEventError(`hook ${subcommand} received a ${event.name} event`);
 		}
+		// Intrusive thoughts off: no state, no store, no work after a tool call.
+		if (event.name === "PostToolUse" && config.intrusionThreshold === null) return 0;
+
 		const now = env.DMN_NOW ? new Date(env.DMN_NOW) : undefined;
 		if (now && Number.isNaN(now.getTime())) throw new Error("DMN_NOW is not an ISO date");
 		// Under DMN_NOW the use stamps follow the same clock as recall.

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -23,9 +23,14 @@ test("hook stop without DMN_STORE_URL exits 1, which Claude Code does not read a
 	expect(result.stderr.toString()).toContain("DMN_STORE_URL");
 });
 
-test("hook post-tool does no work: it never opens the state", () => {
+test("hook post-tool with intrusive thoughts off does no work: it never opens the state", () => {
 	const directory = mkdtempSync(join(tmpdir(), "dmn-post-tool-"));
 	try {
+		mkdirSync(join(directory, "config", "dmn"), { recursive: true });
+		writeFileSync(
+			join(directory, "config", "dmn", "config.json"),
+			JSON.stringify({ intrusionThreshold: null }),
+		);
 		const result = Bun.spawnSync(["bun", "src/cli/index.ts", "hook", "post-tool"], {
 			env: {
 				PATH: process.env.PATH ?? "",
