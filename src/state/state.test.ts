@@ -64,3 +64,17 @@ test("tagFanCache returns fresh counts and null once stale", () => {
 	now = at(90);
 	expect(state.tagFanCache.read("b", 60_000)).toBeNull();
 });
+
+test("intrusions count tool calls since the last emission, and a session without one is never in cooldown", () => {
+	expect(state.toolCallsSince("s1")).toBe(Number.POSITIVE_INFINITY);
+	state.bumpToolCalls("s1");
+	expect(state.toolCallsSince("s1")).toBe(Number.POSITIVE_INFINITY);
+	state.markIntrusion("s1");
+	expect(state.toolCallsSince("s1")).toBe(0);
+	state.bumpToolCalls("s1");
+	state.bumpToolCalls("s1");
+	expect(state.toolCallsSince("s1")).toBe(2);
+	expect(state.toolCallsSince("s2")).toBe(Number.POSITIVE_INFINITY);
+	state.markIntrusion("s1");
+	expect(state.toolCallsSince("s1")).toBe(0);
+});

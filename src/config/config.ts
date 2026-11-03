@@ -19,7 +19,8 @@ export interface Config {
 	budgetTokens: number;
 	topK: number;
 	promptThreshold: number;
-	intrusionThreshold: number;
+	/** Retrieval-probability threshold of intrusive thoughts; null turns them off. */
+	intrusionThreshold: number | null;
 	intrusionCooldown: number;
 	dormancyFloor: number;
 	protectedTags: string[];
@@ -42,7 +43,6 @@ const numberKeys = [
 	"budgetTokens",
 	"topK",
 	"promptThreshold",
-	"intrusionThreshold",
 	"intrusionCooldown",
 	"dormancyFloor",
 	"storeTimeoutMs",
@@ -121,6 +121,17 @@ export function loadConfig(options: LoadConfigOptions): Config {
 			throw new ConfigError(`config.json: "${key}" must be a number`);
 		}
 		config[key] = value;
+	}
+	// JSON has no Infinity, so null is how an operator turns intrusive thoughts off.
+	const { intrusionThreshold } = file;
+	if (intrusionThreshold !== undefined) {
+		if (
+			intrusionThreshold !== null &&
+			(typeof intrusionThreshold !== "number" || !Number.isFinite(intrusionThreshold))
+		) {
+			throw new ConfigError('config.json: "intrusionThreshold" must be a number or null');
+		}
+		config.intrusionThreshold = intrusionThreshold;
 	}
 	const { protectedTags, organizations, replayDir, activation } = file;
 	if (protectedTags !== undefined) {

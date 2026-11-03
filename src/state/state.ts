@@ -117,6 +117,36 @@ export class LocalState {
 		this.database.query("DELETE FROM dormant WHERE memory_id = ?").run(memoryId);
 	}
 
+	/**
+	 * Tool calls since the session's last intrusion, not counting the current one.
+	 * Infinity until the session has had one: the cooldown only follows an emission.
+	 */
+	toolCallsSince(sessionId: string): number {
+		const row = this.database
+			.query<{ tool_calls_since: number }, [string]>(
+				"SELECT tool_calls_since FROM intrusions WHERE session_id = ?",
+			)
+			.get(sessionId);
+		return row ? row.tool_calls_since : Number.POSITIVE_INFINITY;
+	}
+
+	/** Counts one tool call toward the cooldown; a session without an intrusion has none to count. */
+	bumpToolCalls(sessionId: string): void {
+		this.database
+			.query("UPDATE intrusions SET tool_calls_since = tool_calls_since + 1 WHERE session_id = ?")
+			.run(sessionId);
+	}
+
+	/** Starts the cooldown: the session's next intrusion waits for the configured number of calls. */
+	markIntrusion(sessionId: string): void {
+		this.database
+			.query(
+				`INSERT INTO intrusions (session_id, tool_calls_since) VALUES (?, 0)
+				 ON CONFLICT (session_id) DO UPDATE SET tool_calls_since = 0`,
+			)
+			.run(sessionId);
+	}
+
 	readonly tagFanCache = {
 		/** Cached counts for a bank, or null when none is newer than `maxAgeMs`. */
 		read: (bank: string, maxAgeMs: number): TagCount[] | null => {

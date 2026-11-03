@@ -1,0 +1,9 @@
+{
+	"session_id": "session-1",
+	"transcript_path": "__TRANSCRIPT__",
+	"cwd": "__CWD__",
+	"hook_event_name": "PostToolUse",
+	"tool_name": "Bash",
+	"tool_input": { "command": "bun test src/sync/worker.test.ts" },
+	"tool_response": { "stdout": "1 fail" }
+}

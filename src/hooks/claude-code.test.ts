@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { loadConfig } from "../config/config.js";
 import { LocalState } from "../state/state.js";
 import { FakeStore } from "../store/fake.js";
-import type { RetainItem } from "../store/types.js";
+import type { RecallQuery, RetainItem } from "../store/types.js";
 import { type HookDeps, HookEventError, handleHookEvent, parseHookEvent } from "./claude-code.js";
 
 class SpyStore extends FakeStore {
@@ -13,6 +13,14 @@ class SpyStore extends FakeStore {
 	override retain(bank: string, items: RetainItem[], options?: { async?: boolean }) {
 		this.retainOptions.push(options);
 		return super.retain(bank, items);
+	}
+}
+
+class RecallSpyStore extends FakeStore {
+	topKs: number[] = [];
+	override recall(bank: string, query: RecallQuery) {
+		this.topKs.push(query.topK);
+		return super.recall(bank, query);
 	}
 }
 
@@ -93,14 +101,34 @@ test("session start and prompt answer with additionalContext naming the event", 
 	}
 });
 
-test("nothing recalled and a post-tool event give no output", async () => {
+test("nothing recalled gives no output", async () => {
 	const emptyDeps = { ...deps, store: new FakeStore() };
 	expect(
 		await handleHookEvent(event({ hook_event_name: "UserPromptSubmit", prompt: "x" }), emptyDeps),
 	).toBeNull();
-	expect(
-		await handleHookEvent(event({ hook_event_name: "PostToolUse", tool_name: "Read" }), deps),
-	).toBeNull();
+});
+
+test("a post-tool event gives one marked line when the draw is won, then nothing in the cooldown", async () => {
+	const postTool = (session_id: string, extra: object = {}) =>
+		event({
+			hook_event_name: "PostToolUse",
+			session_id,
+			tool_name: "Read",
+			tool_input: { file_path: "retry.ts" },
+			...extra,
+		});
+	// A threshold far below the memory's activation makes the draw certain.
+	const eager = { ...deps, config: { ...deps.config, intrusionThreshold: -100 } };
+	const first = await handleHookEvent(postTool("intrusive"), eager);
+	expect(first?.hookSpecificOutput.hookEventName).toBe("PostToolUse");
+	expect(first?.hookSpecificOutput.additionalContext).toMatch(/^\[m:[^\]\n]+\] retry with jitter$/);
+	expect(await handleHookEvent(postTool("intrusive"), eager)).toBeNull();
+	// Another session has its own cooldown; a threshold above reach, or null, never surfaces.
+	const never = { ...deps, config: { ...deps.config, intrusionThreshold: 100 } };
+	expect(await handleHookEvent(postTool("quiet"), never)).toBeNull();
+	const off = { ...deps, config: { ...deps.config, intrusionThreshold: null } };
+	expect(await handleHookEvent(postTool("off"), off)).toBeNull();
+	expect(state.toolCallsSince("off")).toBe(Number.POSITIVE_INFINITY);
 });
 
 test("stop without a transcript, or with an empty one, does nothing", async () => {
@@ -180,4 +208,13 @@ test("a store that cannot resolve cited ids costs the uses, not the retention", 
 	expect(state.uses("abc").useCount).toBe(0);
 	expect((await down.listTags("generic")).map(({ tag }) => tag)).toContain("kind:turn");
 	expect(warnings.join("\n")).toContain("cannot resolve cited id abc: store down");
+});
+
+test("a post-tool event recalls three candidates, not the prompt-time ten", async () => {
+	const spy = new RecallSpyStore();
+	await handleHookEvent(
+		event({ hook_event_name: "PostToolUse", session_id: "top-k", tool_name: "Read" }),
+		{ ...deps, store: spy },
+	);
+	expect(spy.topKs).toEqual([3]);
 });
