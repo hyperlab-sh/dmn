@@ -24,7 +24,10 @@ for (const { fixture, role, reason } of rows) {
 		if (fixture === "credential-assignment.txt") {
 			// Every line must be caught on its own, so no pattern hides another's gap.
 			for (const line of read(fixture).split("\n").slice(1).filter(Boolean)) {
-				expect(shouldRetain({ role, text: line })).toEqual({ retain: false, reason });
+				expect(shouldRetain({ role, text: line })).toEqual({
+					retain: false,
+					reason: "credential-assignment",
+				});
 			}
 		}
 	});
