@@ -109,21 +109,35 @@ describe("association", () => {
 	const candidates = () => ["x", "y", "z"].map((id) => memory(id, daysAgo(5), []));
 	// X is used enough to sit above the default threshold; Y and Z are equal and below it.
 	const counts = { x: 40 };
-	const run = (edges: [string, string, number][], parameters = defaultActivationParameters) =>
-		rerank(candidates(), cue, new Map(), {
-			state: stateWith(counts, {}, edges),
-			parameters,
-			random: middle,
-			now,
-		});
+	const run = (
+		edges: [string, string, number][],
+		parameters = defaultActivationParameters,
+		order = ["x", "y", "z"],
+	) =>
+		rerank(
+			order.map((id) => memory(id, daysAgo(5), [])),
+			cue,
+			new Map(),
+			{
+				state: stateWith(counts, {}, edges),
+				parameters,
+				random: middle,
+				now,
+			},
+		);
 	const by = (ranked: ReturnType<typeof run>, id: string) =>
 		ranked.find((m) => m.id === id) as ReturnType<typeof run>[number];
 
 	test("a memory associated with a highly activated one outranks an equal one", () => {
-		const ranked = run([
-			["x", "y", 1],
-			["x", "q", 1],
-		]);
+		// Z comes before Y in the input, so only the association term can lift Y over Z.
+		const ranked = run(
+			[
+				["x", "y", 1],
+				["x", "q", 1],
+			],
+			defaultActivationParameters,
+			["x", "z", "y"],
+		);
 		const x = by(ranked, "x");
 		expect(x.activation).toBeGreaterThan(-0.5);
 		expect(ranked.map((m) => m.id)).toEqual(["x", "y", "z"]);

@@ -121,10 +121,11 @@ export class LocalState {
 				for (let j = i + 1; j < unique.length; j++) {
 					const a = unique[i] as string;
 					const b = unique[j] as string;
-					// Ids never contain ":", so a pair key cannot collide with a memory id.
+					// The length prefix keeps pair keys unambiguous for any id; "co:" cannot start a memory
+					// id's own use_events row because those never contain ":".
 					const inserted = this.database
 						.query("INSERT OR IGNORE INTO use_events (memory_id, turn_id, at) VALUES (?, ?, ?)")
-						.run(`co:${a}:${b}`, turnId, at);
+						.run(`co:${a.length}:${a}:${b}`, turnId, at);
 					if (inserted.changes === 0) continue;
 					this.database
 						.query(
