@@ -17,21 +17,22 @@ with status 2 and names it.
 
 Located at `$XDG_CONFIG_HOME/dmn/config.json`. Every key is optional.
 
-| Key                  | Default                                        | Meaning                                                                               |
-| -------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `budgetTokens`       | `600`                                          | Token budget of one injection (one token per four characters).                        |
-| `topK`               | `10`                                           | Candidates fetched per bank before reranking.                                         |
-| `promptThreshold`    | `-0.5`                                         | Reserved for prompt-time filtering by activation.                                     |
-| `intrusionThreshold` | `0.5`                                          | Retrieval-probability threshold of intrusive thoughts; `null` turns them off (below). |
-| `intrusionCooldown`  | `5`                                            | Tool calls a session must make after an intrusive thought before the next.            |
-| `dormancyFloor`      | `-2.0`                                         | Base-level activation below which a memory may go dormant.                            |
-| `protectedTags`      | `decision`, `correction`, `identity`, `person` | Tags that keep a memory from going dormant.                                           |
-| `organizations`      | `{}`                                           | Maps the directory a hyper space sits under to an organization (below).               |
-| `storeTimeoutMs`     | `2000`                                         | Per-request limit for recall, so a hung store cannot stall a prompt.                  |
-| `retainTimeoutMs`    | `60000`                                        | Limit for retain, which waits on fact extraction.                                     |
-| `fanCacheSeconds`    | `300`                                          | How long tag counts are cached.                                                       |
-| `replayDir`          | `$XDG_DATA_HOME/dmn/replay`                    | Where replay runs are written.                                                        |
-| `activation`         | ACT-R defaults                                 | Overrides for the activation parameters.                                              |
+| Key                  | Default                                        | Meaning                                                                                        |
+| -------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `budgetTokens`       | `600`                                          | Token budget of one injection (one token per four characters).                                 |
+| `topK`               | `10`                                           | Candidates fetched per bank before reranking.                                                  |
+| `promptThreshold`    | `-0.5`                                         | Reserved for prompt-time filtering by activation.                                              |
+| `intrusionThreshold` | `0.5`                                          | Retrieval-probability threshold of intrusive thoughts; `null` turns them off (below).          |
+| `intrusionCooldown`  | `5`                                            | Tool calls a session must make after an intrusive thought before the next.                     |
+| `dormancyFloor`      | `-2.0`                                         | Base-level activation below which a memory may go dormant.                                     |
+| `protectedTags`      | `decision`, `correction`, `identity`, `person` | Tags that keep a memory from going dormant.                                                    |
+| `organizations`      | `{}`                                           | Maps the directory a hyper space sits under to an organization (below).                        |
+| `storeTimeoutMs`     | `2000`                                         | Per-request limit for recall, so a hung store cannot stall a prompt.                           |
+| `intrusionTimeoutMs` | `300`                                          | Store limit for the intrusive recall, which runs after tool calls; a slow store costs no more. |
+| `retainTimeoutMs`    | `60000`                                        | Limit for retain, which waits on fact extraction.                                              |
+| `fanCacheSeconds`    | `300`                                          | How long tag counts are cached.                                                                |
+| `replayDir`          | `$XDG_DATA_HOME/dmn/replay`                    | Where replay runs are written.                                                                 |
+| `activation`         | ACT-R defaults                                 | Overrides for the activation parameters.                                                       |
 
 ### Organizations
 
@@ -65,6 +66,8 @@ random draw. Most calls print nothing.
   time; a higher value makes intrusions rarer. It is higher than prompt-time recall on purpose.
 - `intrusionCooldown` (default `5`): after a thought, this many tool calls pass before the next
   can surface. A session with no thought yet is never in cooldown.
+- `intrusionTimeoutMs` (default `300`): how long the intrusive recall may wait for the store. A
+  slow or down store costs a tool call at most this, then the thought is skipped.
 - To turn intrusive thoughts off, set `"intrusionThreshold": null`. The hook then neither
   recalls nor prints.
 

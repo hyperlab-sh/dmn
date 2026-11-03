@@ -79,7 +79,8 @@ afterAll(() => {
 });
 
 test("five tool calls with a cooldown of 3 surface one memory on the first and fifth, uncounted", async () => {
-	// Read, Edit, Bash and an unrelated tool, then Read again.
+	// Calls 2-4 (Edit, Bash, an unrelated tool) sit in the cooldown and only count toward it;
+	// building the query per tool is covered in intrude.test.ts.
 	const calls = [
 		"post-tool-read.json",
 		"post-tool-edit.json",

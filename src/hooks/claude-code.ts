@@ -170,8 +170,9 @@ async function finishTurn(event: HookEvent, deps: HookDeps): Promise<HookOutput>
 /** After a tool call, rarely, one memory as a single line; nothing otherwise. Never an error. */
 async function intrusiveThought(event: HookEvent, deps: HookDeps): Promise<HookOutput> {
 	const { store, state, config, random, draw, now, onWarning } = deps;
+	let memory: Awaited<ReturnType<typeof intrude>>;
 	try {
-		const memory = await intrude({
+		memory = await intrude({
 			store,
 			state,
 			config,
@@ -187,17 +188,17 @@ async function intrusiveThought(event: HookEvent, deps: HookDeps): Promise<HookO
 			...(draw && { draw }),
 			...(now && { now }),
 		});
-		if (!memory) return null;
-		const additionalContext = formatInjection([memory], config.budgetTokens);
-		// The cooldown restarts only with something printed.
-		if (!additionalContext) return null;
-		state.markIntrusion(event.sessionId);
-		return { hookSpecificOutput: { hookEventName: event.name, additionalContext } };
 	} catch (error) {
 		// Optional noise must not cost the developer an error after every tool call.
 		onWarning?.(`dmn: intrusive recall failed: ${(error as Error).message}`);
 		return null;
 	}
+	if (!memory) return null;
+	const additionalContext = formatInjection([memory], config.budgetTokens);
+	// The cooldown restarts only with something printed.
+	if (!additionalContext) return null;
+	state.markIntrusion(event.sessionId);
+	return { hookSpecificOutput: { hookEventName: event.name, additionalContext } };
 }
 
 /** One branch per event. */

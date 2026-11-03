@@ -54,19 +54,27 @@ export async function runHook(
 		// Under DMN_NOW the use stamps follow the same clock as recall.
 		const seed = env.DMN_SEED ?? event.sessionId;
 		const state = await openState(config, now && (() => now));
+		// An intrusive thought is optional: it gets its own short limit, not the prompt's.
+		const storeConfig =
+			event.name === "PostToolUse"
+				? { ...config, storeTimeoutMs: config.intrusionTimeoutMs }
+				: config;
 		try {
 			const output = await handleHookEvent(event, {
-				store: createStore(config),
+				store: createStore(storeConfig),
 				state,
 				config,
 				// DMN_SEED is for tests; otherwise a session's noise is stable per session id.
 				random: seededRandom(seed),
 				// Each tool call draws on its own: a fresh process would replay the session's draws.
+				// Without a tool_use_id only DMN_SEED (tests) may repeat them; otherwise draw freely.
 				...(event.name === "PostToolUse" &&
-					event.toolUseId && {
-						random: intrusionNoise(seed, event.toolUseId),
-						draw: () => intrusionDraw(seed, event.toolUseId as string),
-					}),
+					(event.toolUseId
+						? {
+								random: intrusionNoise(seed, event.toolUseId),
+								draw: () => intrusionDraw(seed, event.toolUseId as string),
+							}
+						: !env.DMN_SEED && { random: Math.random })),
 				// DMN_NOW (ISO date) is for tests, next to DMN_SEED.
 				...(now && { now }),
 				onWarning: (message) => process.stderr.write(`${message}\n`),

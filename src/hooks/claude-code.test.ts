@@ -66,6 +66,7 @@ test("parseHookEvent reads the fields of each event and rejects bad input", () =
 				cwd: "/c",
 				hook_event_name: "PostToolUse",
 				tool_name: "Read",
+				tool_use_id: "toolu_1",
 				tool_input: { file_path: "a" },
 				tool_response: "ok",
 			}),
@@ -76,6 +77,7 @@ test("parseHookEvent reads the fields of each event and rejects bad input", () =
 		transcriptPath: "/t.jsonl",
 		cwd: "/c",
 		toolName: "Read",
+		toolUseId: "toolu_1",
 		toolInput: { file_path: "a" },
 		toolResponse: "ok",
 	});
@@ -118,13 +120,12 @@ const postTool = (session_id: string) =>
 // A threshold far below the memory's activation makes the draw certain.
 const eager = () => ({ ...deps, config: { ...deps.config, intrusionThreshold: -100 } });
 
-test("a post-tool event gives one marked line and restarts the cooldown", async () => {
+test("a post-tool event gives one marked line", async () => {
 	const output = await handleHookEvent(postTool("shape"), eager());
 	expect(output?.hookSpecificOutput.hookEventName).toBe("PostToolUse");
 	expect(output?.hookSpecificOutput.additionalContext).toMatch(
 		/^\[m:[^\]\n]+\] retry with jitter$/,
 	);
-	expect(state.toolCallsSince("shape")).toBe(0);
 });
 
 test("a memory too long for the budget prints nothing and does not restart the cooldown", async () => {
