@@ -7,3 +7,5 @@ export {
 	retrievalProbability,
 	spreadingActivation,
 } from "./activation/act-r.js";
+export type { Cue, CueInput, Role, Task } from "./cue/cue.js";
+export { buildCue, cueText, softTags } from "./cue/cue.js";
