@@ -24,6 +24,8 @@ export interface RetainItem {
 	context?: string;
 	metadata?: Record<string, string>;
 	documentId?: string;
+	/** When the content occurred (ISO 8601); a record's `createdAt`, never the ingest time. */
+	timestamp?: string;
 }
 
 export interface RecallQuery {

@@ -12,8 +12,11 @@ Usage:
   dmn sweep --revive <id>   clear a memory's dormancy
   dmn rest [--apply] [--bank <b>...]   consolidate each bank; report (or apply) cross-project promotions
   dmn recall --role <r> [--top N]   list one role's memories on demand
+  dmn backfill <transcript.jsonl>... [--max-turns <n>] [--dry]   seed the store from past sessions
+    (default 40 prompts per transcript; --dry prints what would be retained)
   dmn help
-  dmn replay <transcript.jsonl>... | dmn replay score <run-dir> | dmn replay judge <run-dir>
+  dmn replay <transcript.jsonl>... [--as-live [--measure-from <iso>] [--uses judged|none]]   replay sessions
+  dmn replay score <run-dir> | dmn replay judge <run-dir>
 
 See https://github.com/hyperlab-sh/dmn for the roadmap.
 `;
@@ -45,6 +48,12 @@ switch (command) {
 		break;
 	case "recall":
 		process.exitCode = await (await import("./commands/recall.js")).runRecall(rest, process.env);
+		break;
+	case "backfill":
+		process.exitCode = await (await import("./commands/backfill.js")).runBackfill(
+			rest,
+			process.env,
+		);
 		break;
 	case "install":
 		process.exitCode = runInstall(rest, process.env);

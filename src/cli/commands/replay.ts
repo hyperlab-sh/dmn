@@ -6,6 +6,7 @@ import type { Manifest } from "../../cue/stack.js";
 import { FakeJudge } from "../../judge/fake.js";
 import type { Judge } from "../../judge/types.js";
 import { judgeRun, MissingRunFileError } from "../../replay/judge.js";
+import { orderPrompts, UntimedPromptError } from "../../replay/live.js";
 import { readManifests } from "../../replay/manifests.js";
 import { RunExistsError, readRunTop, writeReport } from "../../replay/report.js";
 import { readSeedMemories, runName, runReplay, seedFakeStore } from "../../replay/run.js";
@@ -17,8 +18,14 @@ import type { MemoryStore } from "../../store/types.js";
 const usage = `Usage:
   dmn replay <transcript.jsonl>... [--store fake|<url>] [--out <dir>] [--top 5]
              [--memories <json>] [--manifests <dir>] [--judge fake|laya] [--threshold <p>]
+             [--as-live [--measure-from <iso>] [--uses judged|none]]
   dmn replay score <run-dir> [--top 5]
   dmn replay judge <run-dir> [--threshold <p>] [--judge fake|laya]
+
+--as-live replays time: prompts walk in timestamp order with the clock set to each one's
+  time, turns are retained as the Stop hook would have, and --uses judged (the default;
+  needs --judge) counts a shown memory the judge calls useful as used. --measure-from
+  <iso> retains-only the prompts before it, seeding the store from history.
 `;
 
 class UsageError extends Error {}
@@ -32,6 +39,9 @@ interface Options {
 	manifests?: string;
 	threshold?: number;
 	judge?: "fake" | "laya";
+	asLive?: boolean;
+	uses?: "judged" | "none";
+	measureFrom?: Date;
 }
 
 function parseArguments(argv: string[]): Options {
@@ -40,6 +50,10 @@ function parseArguments(argv: string[]): Options {
 		const argument = argv[i] as string;
 		if (!argument.startsWith("--")) {
 			options.files.push(argument);
+			continue;
+		}
+		if (argument === "--as-live") {
+			options.asLive = true;
 			continue;
 		}
 		const value = argv[++i];
@@ -69,6 +83,17 @@ function parseArguments(argv: string[]): Options {
 					throw new UsageError("--judge must be fake or laya");
 				options.judge = value;
 				break;
+			case "--uses":
+				if (value !== "judged" && value !== "none")
+					throw new UsageError("--uses must be judged or none");
+				options.uses = value;
+				break;
+			case "--measure-from": {
+				const at = new Date(value);
+				if (Number.isNaN(at.getTime())) throw new UsageError("--measure-from is not a date");
+				options.measureFrom = at;
+				break;
+			}
 			case "--top": {
 				const top = Number(value);
 				if (!Number.isInteger(top) || top < 1)
@@ -155,6 +180,13 @@ async function judgeCommand(argv: string[]): Promise<number> {
 async function replayCommand(argv: string[]): Promise<number> {
 	const options = parseArguments(argv);
 	if (options.files.length === 0) throw new UsageError("no transcripts given");
+	if ((options.uses !== undefined || options.measureFrom !== undefined) && !options.asLive) {
+		throw new UsageError("--uses and --measure-from need --as-live");
+	}
+	const uses = options.uses ?? "judged";
+	if (options.asLive && uses === "judged" && !options.judge) {
+		throw new UsageError("--as-live --uses judged needs --judge fake|laya (or pass --uses none)");
+	}
 	const storeOption = options.store ?? process.env.DMN_STORE_URL;
 	if (!storeOption) throw new UsageError("pass --store fake|<url> (or set DMN_STORE_URL)");
 	const config = loadConfig({
@@ -163,6 +195,10 @@ async function replayCommand(argv: string[]): Promise<number> {
 	const now = process.env.DMN_NOW ? new Date(process.env.DMN_NOW) : new Date();
 	if (Number.isNaN(now.getTime())) throw new UsageError("DMN_NOW is not a date");
 	const random = process.env.DMN_SEED ? seededRandom(process.env.DMN_SEED) : Math.random;
+	// The as-live walk needs every prompt placed in time: refuse before anything is retained.
+	const prompts = options.asLive
+		? orderPrompts(options.files)
+		: options.files.flatMap((file) => promptsFrom(file));
 
 	let store: MemoryStore;
 	if (config.storeUrl === "fake:") {
@@ -174,10 +210,10 @@ async function replayCommand(argv: string[]): Promise<number> {
 		store = createStore(config);
 	}
 	const manifests: Manifest[] = options.manifests ? readManifests(options.manifests) : [];
-	// Only an explicit --judge adds the third order: a configured provider alone does not make a
-	// replay call the network.
+	// Only an explicit --judge adds the third order: a configured provider alone does not make
+	// a replay call the network. In --as-live the judge named by --judge is the use signal's
+	// (D36), not a third order.
 	const judge = options.judge ? judgeFor(options.judge, config, process.env) : undefined;
-	const prompts = options.files.flatMap((file) => promptsFrom(file));
 
 	// Known before the replay starts: refuse early rather than after every store query.
 	const directory = join(options.out ?? config.replayDir, runName(now));
@@ -185,7 +221,8 @@ async function replayCommand(argv: string[]): Promise<number> {
 
 	// A scratch state: replay must not touch the real use counts.
 	const scratch = mkdtempSync(join(tmpdir(), "dmn-replay-"));
-	const state = new LocalState({ directory: scratch, clock: () => now });
+	let clockNow = now;
+	const state = new LocalState({ directory: scratch, clock: () => clockNow });
 	try {
 		const result = await runReplay({
 			prompts,
@@ -196,7 +233,23 @@ async function replayCommand(argv: string[]): Promise<number> {
 			random,
 			now,
 			manifests,
-			...(judge && { gate: { judge, threshold: options.threshold ?? config.judge.threshold } }),
+			...(judge &&
+				!options.asLive && {
+					gate: { judge, threshold: options.threshold ?? config.judge.threshold },
+				}),
+			...(options.asLive && {
+				live: {
+					uses,
+					// The walk moves this clock before every step; state stamps follow the prompt.
+					clock: {
+						set: (at: Date) => {
+							clockNow = at;
+						},
+					},
+					...(judge && { judge }),
+					...(options.measureFrom !== undefined && { measureFrom: options.measureFrom }),
+				},
+			}),
 		});
 		writeReport(result, directory);
 		for (const warning of result.warnings) process.stderr.write(`dmn: ${warning}\n`);
@@ -211,6 +264,10 @@ async function replayCommand(argv: string[]): Promise<number> {
 /** `dmn replay …`; returns the exit code. */
 export async function run(argv: string[]): Promise<number> {
 	try {
+		if (argv.includes("--help") || argv.includes("-h")) {
+			process.stdout.write(usage);
+			return 0;
+		}
 		if (argv[0] === "score") return scoreCommand(argv.slice(1));
 		if (argv[0] === "judge") return await judgeCommand(argv.slice(1));
 		return await replayCommand(argv);
@@ -219,7 +276,8 @@ export async function run(argv: string[]): Promise<number> {
 			error instanceof UsageError ||
 			error instanceof ConfigError ||
 			error instanceof RunExistsError ||
-			error instanceof MissingRunFileError
+			error instanceof MissingRunFileError ||
+			error instanceof UntimedPromptError
 		) {
 			process.stderr.write(`dmn: ${error.message}\n\n${usage}`);
 			return 2;

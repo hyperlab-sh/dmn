@@ -104,6 +104,8 @@ export async function retainTurns(
 		content: turn.text,
 		tags: [...softTags(cue), `kind:${kinds[index]}`],
 		metadata: { speaker: turn.role, retained_at: now.toISOString() },
+		// The content time: what a replayed retain backdates and a live one stamps now.
+		timestamp: now.toISOString(),
 		// A repeated stop for the same turn replaces the document instead of duplicating it.
 		...(turn.documentId !== undefined && { documentId: `${turn.documentId}:${turn.role}` }),
 	}));

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { bankFor, HindsightStore, isBankNotFound, StoreError } from "./hindsight.js";
-import type { MentalModel } from "./types.js";
+import type { MemoryRecord, MentalModel } from "./types.js";
 
 let oddServer: ReturnType<typeof Bun.serve>;
 let baseUrl: string;
@@ -182,6 +182,79 @@ test("bankFor maps organizations to org-<name> and no organization to generic", 
 	expect(bankFor("acme")).toBe("org-acme");
 	expect(bankFor(undefined)).toBe("generic");
 	expect(bankFor("generic")).toBe("generic");
+});
+
+test("retain sends the content time as timestamp beside the document id", async () => {
+	const store = new HindsightStore({ baseUrl: "http://stub" });
+	const requests = await stubbedFetch(
+		() => Response.json({ success: true }),
+		async () => {
+			await store.retain("b", [
+				{
+					content: "the retry cap was lowered",
+					tags: ["kind:turn"],
+					documentId: "live-a.jsonl:0:user",
+					timestamp: "2026-01-02T09:00:00.000Z",
+				},
+				{ content: "no timestamp given", tags: [] },
+			]);
+		},
+	);
+	expect(requests).toEqual([
+		{
+			url: "http://stub/v1/default/banks/b/memories",
+			method: "POST",
+			contentType: "application/json",
+			body: {
+				items: [
+					{
+						content: "the retry cap was lowered",
+						tags: ["kind:turn"],
+						document_id: "live-a.jsonl:0:user",
+						timestamp: "2026-01-02T09:00:00.000Z",
+					},
+					{ content: "no timestamp given", tags: [] },
+				],
+				async: false,
+			},
+		},
+	]);
+});
+
+test("toRecord takes createdAt from the content-time fields, created_at as the fallback", async () => {
+	const store = new HindsightStore({ baseUrl: "http://stub" });
+	// The wire shape this Hindsight answers: `date` on list/get, `mentioned_at` on recall — both
+	// carry the retain timestamp — and an ingest-only `created_at` must not win over either.
+	let fetched: MemoryRecord | undefined;
+	await stubbedFetch(
+		() =>
+			Response.json({
+				id: "00000000-0000-4000-8000-000000000009",
+				text: "the retry cap was lowered",
+				date: "2026-01-02T09:00:00+00:00",
+				mentioned_at: "2026-01-02T09:00:00+00:00",
+				created_at: "2026-11-03T16:00:00+00:00",
+			}),
+		async () => {
+			fetched = (await store.get("b", "00000000-0000-4000-8000-000000000009")) ?? undefined;
+		},
+	);
+	expect(fetched).toMatchObject({ createdAt: "2026-01-02T09:00:00+00:00" });
+
+	// An answer with no content-time field falls back to created_at, the ingest time.
+	let ingest: MemoryRecord | undefined;
+	await stubbedFetch(
+		() =>
+			Response.json({
+				id: "00000000-0000-4000-8000-000000000010",
+				text: "an old server's memory",
+				created_at: "2026-11-03T16:00:00+00:00",
+			}),
+		async () => {
+			ingest = (await store.get("b", "00000000-0000-4000-8000-000000000010")) ?? undefined;
+		},
+	);
+	expect(ingest).toMatchObject({ createdAt: "2026-11-03T16:00:00+00:00" });
 });
 
 test("a hung store aborts at timeoutMs as a StoreError with status 0", async () => {

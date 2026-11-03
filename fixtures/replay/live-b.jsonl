@@ -1,0 +1,4 @@
+{"type":"user","cwd":"/home/dev/acme/widgets","timestamp":"2026-01-02T09:30:00.000Z","message":{"role":"user","content":"The widgets parser caches its grammar"}}
+{"type":"assistant","cwd":"/home/dev/acme/widgets","timestamp":"2026-01-02T09:30:30.000Z","message":{"role":"assistant","content":[{"type":"text","text":"The widgets parser caches its grammar between runs"}]}}
+{"type":"user","cwd":"/home/dev/acme/widgets","timestamp":"2026-03-10T09:00:00.000Z","message":{"role":"user","content":"The widgets parser build fails again"}}
+{"type":"assistant","cwd":"/home/dev/acme/widgets","timestamp":"2026-03-10T09:00:30.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Regenerate the grammar fixture and the build recovers"}]}}

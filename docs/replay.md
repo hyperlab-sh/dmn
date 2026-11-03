@@ -11,14 +11,17 @@ export DMN_STORE_URL=http://your-hindsight:8888    # or pass --store
 dmn replay ~/.claude/projects/<project>/<session>.jsonl [more.jsonl ...] [--top 5]
 ```
 
-| Option                | Meaning                                                                                                                                                                                  |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--store fake\|<url>` | `fake` seeds an in-process store from `--memories`; a URL is a real Hindsight. Falls back to `DMN_STORE_URL`.                                                                            |
-| `--memories <json>`   | Memories for the fake store: `[{bank, tags, text, createdAt?}]`. Default `fixtures/replay/memories.json`, relative to the current directory, so run from a checkout; otherwise an error. |
-| `--manifests <dir>`   | Directory whose `package.json`, `tsconfig.json`, `Cargo.toml`, `pyproject.toml` give the cue's stack.                                                                                    |
-| `--out <dir>`         | Where run directories go. Default: the `replayDir` config key.                                                                                                                           |
-| `--top <n>`           | List length and the `n` of precision@n. Default 5.                                                                                                                                       |
-| `--judge fake\|laya`  | Adds a third order, `activation+judge` (below). Only this flag does: a configured provider alone makes no replay call the network. `--threshold <p>` overrides `judge.threshold`.        |
+| Option                 | Meaning                                                                                                                                                                                  |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--store fake\|<url>`  | `fake` seeds an in-process store from `--memories`; a URL is a real Hindsight. Falls back to `DMN_STORE_URL`.                                                                            |
+| `--memories <json>`    | Memories for the fake store: `[{bank, tags, text, createdAt?}]`. Default `fixtures/replay/memories.json`, relative to the current directory, so run from a checkout; otherwise an error. |
+| `--manifests <dir>`    | Directory whose `package.json`, `tsconfig.json`, `Cargo.toml`, `pyproject.toml` give the cue's stack.                                                                                    |
+| `--out <dir>`          | Where run directories go. Default: the `replayDir` config key.                                                                                                                           |
+| `--top <n>`            | List length and the `n` of precision@n. Default 5.                                                                                                                                       |
+| `--judge fake\|laya`   | Adds a third order, `activation+judge` (below). Only this flag does: a configured provider alone makes no replay call the network. `--threshold <p>` overrides `judge.threshold`.        |
+| `--as-live`            | Replay time instead of reading a seeded store (below). Every prompt line must carry a timestamp; a prompt without one exits 2 naming the file and index.                                 |
+| `--measure-from <iso>` | With `--as-live`: prompts before this time are retained only — seeding, never measured.                                                                                                  |
+| `--uses judged\|none`  | With `--as-live`: the use signal (below). `judged` (the default) needs `--judge`; `none` records nothing, for an ablation.                                                               |
 
 Each run writes `<out>/run-<timestamp>/report.md`, `judgements.json`, and the texts `replay judge`
 needs: `memories.json` (`{id: text}` of every shown memory) and `prompts.json` (`{number: prompt}`). `prompts.json` holds the full text of your prompts, so
@@ -118,6 +121,61 @@ same judge and threshold (see above), not a gain.
 Read the number as a comparison on your own prompts, not an absolute: a gap of one memory per
 prompt on a few dozen prompts is signal; a gap on five prompts is noise, and the activation
 noise term moves ranks between runs, so judge the same run you scored.
+
+## As-live replay
+
+A plain run measures recall against a store seeded in one go: every memory has the same age,
+no use events exist and no co-use edges do, so the two orders differ only by noise. As-live
+replays the sessions the way a live install would have lived them:
+
+```bash
+export DMN_STORE_URL=http://your-hindsight:8888    # or pass --store
+dmn replay --as-live --judge laya a.jsonl b.jsonl [--measure-from 2026-11-01] [--top 5]
+```
+
+The prompts of every transcript are merged and walked in timestamp order, and the clock is
+set to each prompt's own time. Recall at prompt N sees only what was retained before N;
+after a prompt is reported, its user and assistant turns are retained with that timestamp —
+the same `retainTurns` call the Stop hook makes, secrets filtered — so the next prompt can
+recall them; the sweep runs whenever the replayed calendar day (UTC) changes, and once more
+after the last prompt. Use counts, co-use edges and dormancy therefore accrue in replayed
+time, exactly as they would have.
+
+- **Use signal.** `--uses judged` (the default) needs `--judge`: every memory shown at a
+  prompt that the judge calls useful at `judge.threshold` counts as _used_ — a use event and
+  co-use edges under the replayed clock, as a cited `[m:<id>]` marker would. In this mode the
+  judge named by `--judge` is the use signal, not a third order: no `activation+judge` list is
+  written. `--uses none` records nothing, for an ablation without reinforcement.
+- **Seeding and measuring in one run.** `--measure-from <iso>` retains-only the prompts before
+  it: they are never recalled, judged or reported. Point it at the date you installed dmn and
+  the same run seeds the store from the older sessions and measures the newer ones.
+- **The report.** The header gains `mode: as-live`, `uses:`, `measure-from:` and `seeded:`
+  after `top:`; `dmn replay score` reads `top:` as before and ignores the rest. Judging and
+  scoring work on the run exactly as on a plain one.
+
+With `--store fake` the walk runs against an in-process store you can seed with `--memories`;
+the local state is still a scratch directory, deleted afterwards. For reproducibility set
+`DMN_SEED` and `DMN_NOW` as usual: `DMN_NOW` names the run directory only — every recorded
+age, use and dormancy decision inside the walk comes from the prompts' own timestamps.
+
+## Seed a store from history
+
+`dmn backfill` is the seeding half of as-live, for a user installing dmn with a history:
+
+```bash
+export DMN_STORE_URL=http://your-hindsight:8888
+dmn backfill ~/.claude/projects/<project>/<session>.jsonl [more.jsonl ...] [--max-turns 40] [--dry]
+```
+
+Each prompt's user and assistant turns are retained through the same filter the Stop hook
+applies (protocol traffic and secrets never make it), stamped with the prompt's recorded time —
+backfilled memories carry their content time, never the ingest time — under the document id
+`<file>:<index>`, so re-running replaces documents instead of duplicating them. `--max-turns`
+limits the prompts taken per transcript (default 40; the lead measured with 25). `--dry`
+prints one line per transcript — `prompts=`, `retained=` and the skipped-reason counts — and
+retains nothing; it needs no store. Without `--dry` the run prints `total retained N` and
+needs `DMN_STORE_URL`. A transcript prompt without a timestamp exits 2 naming the file and
+the prompt's index, before anything is retained.
 
 ## Known limitation: the cue is rebuilt without the filesystem
 

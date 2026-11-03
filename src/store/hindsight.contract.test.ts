@@ -44,6 +44,39 @@ describe.skipIf(!storeUrl)("Hindsight contract (needs DMN_STORE_URL)", () => {
 		expect(await store.get(bank, "not-a-uuid")).toBeNull();
 	}, 120_000);
 
+	test("a retained timestamp comes back as the memory's content time", async () => {
+		const store = new HindsightStore({
+			baseUrl: storeUrl ?? "",
+			timeoutMs: 30_000,
+			retainTimeoutMs: 100_000,
+		});
+		const bank = `contract-time-${crypto.randomUUID().slice(0, 8)}`;
+		const suffix = crypto.randomUUID().slice(0, 8);
+		const tag = `content-time:${suffix}`;
+		// A year in the past: far from the ingest time, so a stamped-at-ingest store cannot pass.
+		const contentTime = "2025-05-04T00:00:00.000Z";
+		await store.retain(bank, [
+			{
+				content: "The gateway logs every retry with its backoff delay.",
+				tags: [tag],
+				timestamp: contentTime,
+			},
+		]);
+
+		const found = await store.recall(bank, {
+			query: "gateway retry backoff delay",
+			tags: [tag],
+			tagsMatch: "all_strict",
+			topK: 10,
+		});
+		expect(found).toHaveLength(1);
+		expect(Date.parse(found[0]?.createdAt ?? "")).toBe(Date.parse(contentTime));
+		const fetched = await store.get(bank, found[0]?.id ?? "");
+		expect(Date.parse(fetched?.createdAt ?? "")).toBe(Date.parse(contentTime));
+		const listed = await store.list(bank, { limit: 10, offset: 0 });
+		expect(Date.parse(listed[0]?.createdAt ?? "")).toBe(Date.parse(contentTime));
+	}, 120_000);
+
 	test("consolidate returns the store's operation id and deduplicated count", async () => {
 		const store = new HindsightStore({ baseUrl: storeUrl ?? "", timeoutMs: 30_000 });
 		const bank = `contract-consolidate-${crypto.randomUUID().slice(0, 8)}`;
