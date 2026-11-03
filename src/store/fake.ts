@@ -146,14 +146,28 @@ function wire(record: MemoryRecord) {
 	};
 }
 
-/** Serves the Hindsight endpoints dmn uses on a free localhost port, backed by a `FakeStore`. */
-export function startFakeServer(): { url: string; stop: () => void } {
+/**
+ * Serves the Hindsight endpoints dmn uses on a free localhost port, backed by a `FakeStore`.
+ * `options.judgeBatch`, when given, also answers the Laya judge API's
+ * `POST /v1/systemone/batch`, so a hook test needs no second server; it returns the batch's
+ * `results` array for the request items it receives.
+ */
+export function startFakeServer(options?: {
+	judgeBatch?: (requests: { state: string; questions?: unknown }[]) => unknown[];
+}): { url: string; stop: () => void } {
 	const store = new FakeStore();
 	const server = Bun.serve({
 		port: 0,
 		hostname: "127.0.0.1",
 		async fetch(request) {
 			const url = new URL(request.url);
+			if (url.pathname === "/v1/systemone/batch") {
+				if (!options?.judgeBatch) return new Response("not found", { status: 404 });
+				const body = (await request.json()) as {
+					requests: { state: string; questions?: unknown }[];
+				};
+				return Response.json({ results: options.judgeBatch(body.requests) });
+			}
 			const match = url.pathname.match(/^\/v1\/default\/banks\/([^/]+)(\/.*)$/);
 			if (!match?.[1] || !match[2]) return new Response("not found", { status: 404 });
 			const bank = decodeURIComponent(match[1]);
