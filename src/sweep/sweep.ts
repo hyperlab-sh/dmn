@@ -53,12 +53,12 @@ export async function sweep({
 				// Creation counts as the first use, as in recall.
 				const level = baseLevelActivation(uses.useCount + 1, hours, config.activation.decay);
 				if (level >= config.dormancyFloor) continue;
+				// Already dormant: examined, but this run writes and reports nothing for it.
+				if (state.isDormant(memory.id)) continue;
 				if (memory.tags.some((tag) => protectedTags.has(tag))) {
 					result.protectedKept.push(memory.id);
 					continue;
 				}
-				// Already dormant: examined, but this run writes nothing for it.
-				if (state.isDormant(memory.id)) continue;
 				result.dormant.push(memory.id);
 				if (!dryRun) state.setDormant(memory.id);
 			}

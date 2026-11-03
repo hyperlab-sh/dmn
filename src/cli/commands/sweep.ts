@@ -36,7 +36,7 @@ export async function runSweep(
 		try {
 			if (values.revive !== undefined) {
 				if (!state.isDormant(values.revive)) {
-					process.stderr.write(`dmn: ${values.revive} is not dormant\n`);
+					process.stderr.write(`dmn: sweep: ${values.revive} is not dormant\n`);
 					return 1;
 				}
 				state.revive(values.revive);
