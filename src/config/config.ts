@@ -28,6 +28,8 @@ export interface Config {
 	replayDir: string;
 	stateDir: string;
 	storeTimeoutMs: number;
+	/** Store limit for the intrusive recall, which runs after every tool call. */
+	intrusionTimeoutMs: number;
 	retainTimeoutMs: number;
 	fanCacheSeconds: number;
 	activation: ActivationParameters;
@@ -46,6 +48,7 @@ const numberKeys = [
 	"intrusionCooldown",
 	"dormancyFloor",
 	"storeTimeoutMs",
+	"intrusionTimeoutMs",
 	"retainTimeoutMs",
 	"fanCacheSeconds",
 ] as const;
@@ -109,6 +112,7 @@ export function loadConfig(options: LoadConfigOptions): Config {
 		replayDir: join(xdgDirectory(env, "XDG_DATA_HOME", ".local/share"), "replay"),
 		stateDir: xdgDirectory(env, "XDG_STATE_HOME", ".local/state"),
 		storeTimeoutMs: 2000,
+		intrusionTimeoutMs: 300,
 		retainTimeoutMs: 60_000,
 		fanCacheSeconds: 300,
 		activation: { ...defaultActivationParameters },
