@@ -11,15 +11,15 @@ export DMN_STORE_URL=http://your-hindsight:8888    # or pass --store
 dmn replay ~/.claude/projects/<project>/<session>.jsonl [more.jsonl ...] [--top 5]
 ```
 
-| Option                | Meaning                                                                                                                                      |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--store fake\|<url>` | `fake` seeds an in-process store from `--memories`; a URL is a real Hindsight. Falls back to `DMN_STORE_URL`.                                |
-| `--memories <json>`   | Memories for the fake store: `[{bank, tags, text, createdAt?}]`. Default `fixtures/replay/memories.json` when it exists, otherwise an error. |
-| `--manifests <dir>`   | Directory whose `package.json`, `tsconfig.json`, `Cargo.toml`, `pyproject.toml` give the cue's stack.                                        |
-| `--out <dir>`         | Where run directories go. Default: the `replayDir` config key.                                                                               |
-| `--top <n>`           | List length and the `n` of precision@n. Default 5.                                                                                           |
+| Option                | Meaning                                                                                                                                                                                  |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--store fake\|<url>` | `fake` seeds an in-process store from `--memories`; a URL is a real Hindsight. Falls back to `DMN_STORE_URL`.                                                                            |
+| `--memories <json>`   | Memories for the fake store: `[{bank, tags, text, createdAt?}]`. Default `fixtures/replay/memories.json`, relative to the current directory, so run from a checkout; otherwise an error. |
+| `--manifests <dir>`   | Directory whose `package.json`, `tsconfig.json`, `Cargo.toml`, `pyproject.toml` give the cue's stack.                                                                                    |
+| `--out <dir>`         | Where run directories go. Default: the `replayDir` config key.                                                                                                                           |
+| `--top <n>`           | List length and the `n` of precision@n. Default 5.                                                                                                                                       |
 
-Each run writes `<out>/run-<timestamp>/report.md` and `judgements.json`. The harness only reads
+Each run writes `<out>/run-<timestamp>/report.md` and `judgements.json`. A run directory that already exists is never overwritten (exit 2): your judgements are in it, so with a fixed `DMN_NOW` pass another `--out` or remove the directory. The report records the run's `top:`, and `replay score` uses it. The harness only reads
 the store; the one `retain` is the seeding of the fake store. Use counts live in a scratch state
 that is deleted afterwards.
 
@@ -48,7 +48,7 @@ activation p@5 = 0.60
 judged 20/20
 ```
 
-Precision@5 per order is the useful memories among a prompt's first five shown, over five,
+Precision@5 per order (@`top` of the run, which `score` reads from the report; `--top` overrides) is the useful memories among a prompt's first five shown, over five,
 averaged over the prompts. A list shorter than five is still divided by five. Entries left at
 `null` count as not useful; `judged` says how many you filled in. The command rewrites the
 `## Summary` section of `report.md` with both numbers side by side (before scoring it says

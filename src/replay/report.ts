@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Cue } from "../cue/cue.js";
 import type { ReplayResult } from "./run.js";
@@ -16,6 +16,20 @@ export interface Scores {
 	judged: number;
 	total: number;
 	top: number;
+}
+
+/** A run directory that already exists: writing would overwrite judgements the operator filled in. */
+export class RunExistsError extends Error {
+	constructor(directory: string) {
+		super(`${directory} exists; pass another --out or remove it`);
+		this.name = "RunExistsError";
+	}
+}
+
+/** The `top` a run was made with, from the `top: N` line under the report title. */
+export function readRunTop(directory: string): number | undefined {
+	const match = /^top: (\d+)$/m.exec(readFileSync(join(directory, "report.md"), "utf8"));
+	return match?.[1] ? Number(match[1]) : undefined;
 }
 
 export const summaryHeading = "## Summary";
@@ -47,11 +61,12 @@ export function renderSummary(scores?: Scores): string {
 
 /** Writes `report.md` and the judgements skeleton (`useful: null`) into `directory`. */
 export function writeReport(result: ReplayResult, directory: string): void {
-	const lines = [`# dmn replay ${result.run}`, ""];
+	if (existsSync(directory)) throw new RunExistsError(directory);
+	const lines = [`# dmn replay ${result.run}`, "", `top: ${result.top}`, ""];
 	const judgements: Judgement[] = [];
 	for (const entry of result.entries) {
 		lines.push(
-			`### Prompt ${entry.number}`,
+			`### Prompt ${entry.number}${entry.prompt.at ? ` (${entry.prompt.at})` : ""}`,
 			"",
 			`cue: ${cueTuple(entry.cue)}`,
 			`> ${oneLine(entry.prompt.text, 120)}`,

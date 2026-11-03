@@ -1,12 +1,12 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../config/config.js";
 import { LocalState } from "../state/state.js";
 import type { FakeStore } from "../store/fake.js";
 import { readManifests } from "./manifests.js";
-import { type Judgement, writeReport } from "./report.js";
+import { type Judgement, RunExistsError, writeReport } from "./report.js";
 import { readSeedMemories, runReplay, seedFakeStore } from "./run.js";
 import { promptsFrom } from "./transcript.js";
 
@@ -131,4 +131,13 @@ test("activation order differs from store order, and the harness never retains",
 test("without --manifests the stack is empty; with them it comes from the override", async () => {
 	expect((await replay([])).entries[0]?.cue.stack).toEqual([]);
 	expect((await replay()).entries[0]?.cue.stack).toEqual(["typescript"]);
+});
+
+test("a run directory that already exists is never overwritten", async () => {
+	const result = await replay();
+	const directory = join(scratch, "filled");
+	writeReport(result, directory);
+	writeFileSync(join(directory, "judgements.json"), "[]");
+	expect(() => writeReport(result, directory)).toThrow(RunExistsError);
+	expect(readFileSync(join(directory, "judgements.json"), "utf8")).toBe("[]");
 });

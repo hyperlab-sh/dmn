@@ -6,8 +6,9 @@ const usage = `dmn — Default Mode Network
 Usage:
   dmn --version
   dmn help
+  dmn replay <transcript.jsonl>... | dmn replay score <run-dir>
 
-Nothing else yet. See https://github.com/hyperlab-sh/dmn for the roadmap.
+See https://github.com/hyperlab-sh/dmn for the roadmap.
 `;
 
 const [command = "help"] = process.argv.slice(2);
