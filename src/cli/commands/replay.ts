@@ -13,6 +13,7 @@ import { readSeedMemories, runName, runReplay, seedFakeStore } from "../../repla
 import { readJudgements, score, writeSummary } from "../../replay/score.js";
 import { promptsFrom } from "../../replay/transcript.js";
 import { LocalState } from "../../state/state.js";
+import { FakeStore } from "../../store/fake.js";
 import type { MemoryStore } from "../../store/types.js";
 
 const usage = `Usage:
@@ -200,12 +201,21 @@ async function replayCommand(argv: string[]): Promise<number> {
 		? orderPrompts(options.files)
 		: options.files.flatMap((file) => promptsFrom(file));
 
+	// The walk's clock starts at the run's now; the live option moves it before every step.
+	let clockNow = now;
 	let store: MemoryStore;
 	if (config.storeUrl === "fake:") {
-		const memories = options.memories ?? "fixtures/replay/memories.json";
-		if (!existsSync(memories))
-			throw new UsageError(`${memories} not found; pass --memories <json>`);
-		store = await seedFakeStore(readSeedMemories(memories), now);
+		if (options.asLive && !options.memories) {
+			// An as-live run measures the store the walk itself builds: seeding the dated fixture
+			// memories would recall later content at earlier prompts (AC 3). Pass --memories to
+			// start from a chosen set anyway.
+			store = new FakeStore(() => clockNow);
+		} else {
+			const memories = options.memories ?? "fixtures/replay/memories.json";
+			if (!existsSync(memories))
+				throw new UsageError(`${memories} not found; pass --memories <json>`);
+			store = await seedFakeStore(readSeedMemories(memories), now);
+		}
 	} else {
 		store = createStore(config);
 	}
@@ -221,7 +231,6 @@ async function replayCommand(argv: string[]): Promise<number> {
 
 	// A scratch state: replay must not touch the real use counts.
 	const scratch = mkdtempSync(join(tmpdir(), "dmn-replay-"));
-	let clockNow = now;
 	const state = new LocalState({ directory: scratch, clock: () => clockNow });
 	try {
 		const result = await runReplay({
@@ -253,7 +262,9 @@ async function replayCommand(argv: string[]): Promise<number> {
 		});
 		writeReport(result, directory);
 		for (const warning of result.warnings) process.stderr.write(`dmn: ${warning}\n`);
-		console.log(`wrote ${join(directory, "report.md")} and ${join(directory, "judgements.json")}`);
+		process.stdout.write(
+			`wrote ${join(directory, "report.md")} and ${join(directory, "judgements.json")}\n`,
+		);
 		return 0;
 	} finally {
 		state.close();

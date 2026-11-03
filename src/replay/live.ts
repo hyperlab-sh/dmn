@@ -15,15 +15,17 @@ export interface LivePrompt extends ReplayPrompt {
 	answer: string;
 	/** The transcript's basename; the documentId namespace of the retained turns. */
 	file: string;
+	/** The transcript path as given: one output line and one --max-turns count per path. */
+	path: string;
 }
 
 /** A prompt the live walk cannot place in time: no timestamp, or not a parseable date. */
 export class UntimedPromptError extends Error {
 	constructor(
-		readonly file: string,
+		readonly path: string,
 		readonly index: number,
 	) {
-		super(`${file}: prompt ${index} has no timestamp; the live walk needs one`);
+		super(`${path}: prompt ${index} has no timestamp; the live walk needs one`);
 		this.name = "UntimedPromptError";
 	}
 }
@@ -42,9 +44,9 @@ export function orderPrompts(transcripts: string[]): LivePrompt[] {
 		for (const prompt of prompts) {
 			// An unparseable `at` is as useless as none: every step of the walk keys on it.
 			if (!prompt.at || Number.isNaN(Date.parse(prompt.at))) {
-				throw new UntimedPromptError(file, prompt.index);
+				throw new UntimedPromptError(path, prompt.index);
 			}
-			ordered.push({ ...prompt, file, answer: answers[prompt.index] ?? "" });
+			ordered.push({ ...prompt, file, path, answer: answers[prompt.index] ?? "" });
 		}
 	}
 	return ordered.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
@@ -70,7 +72,8 @@ export function retainPrompt(
 			{ role: "user", text: prompt.text, documentId },
 			{ role: "assistant", text: answer, documentId },
 		],
-		{ now },
+		// The next prompt (or the command's exit) must see these turns: wait out extraction.
+		{ now, async: false },
 	);
 }
 
