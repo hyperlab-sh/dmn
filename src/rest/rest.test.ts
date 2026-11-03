@@ -337,3 +337,19 @@ test("a bank whose pass fails is reported and the run continues with the others"
 	expect(warnings).toHaveLength(1);
 	expect(warnings[0]).toContain("org-boom");
 });
+
+test("a roster step that throws is the bank's failure, and the bank's report survives it", async () => {
+	const state = newState();
+	seedUses(state, seeded.ids);
+	const report = await runRest(seeded.store, state, config(), {
+		banks: [bank],
+		now,
+		syncRoster: () => {
+			throw new Error("roster down");
+		},
+	});
+	// Consolidation and proposals ran before the roster; only the last step failed.
+	expect(report.banks[0]?.consolidation).toEqual({ operationId: "fake", deduplicated: 0 });
+	expect(report.banks[0]?.proposals).toHaveLength(2);
+	expect(report.banks[0]?.error).toContain("roster down");
+});

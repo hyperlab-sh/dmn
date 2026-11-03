@@ -180,14 +180,14 @@ export async function runRest(
 					onWarning?.(`dmn: cannot promote ${proposal.id}: ${(error as Error).message}`);
 				}
 			}
+			// Step 3: the roster sync, a no-op until unit roster wires it from cli/commands/rest.ts.
+			// Inside the try: a roster that throws is this bank's failure, not the run's.
+			await syncRoster?.(bank);
 		} catch (error) {
 			// The banks already processed keep their report; this one says what went wrong.
 			entry.error = (error as Error).message;
 			onWarning?.(`dmn: rest for bank ${bank} failed: ${entry.error}`);
-			continue;
 		}
-		// Step 3: the roster sync, a no-op until unit roster wires it from cli/commands/rest.ts.
-		await syncRoster?.(bank);
 	}
 	return report;
 }
