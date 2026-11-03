@@ -13,6 +13,7 @@ const config = loadConfig({
 	env: { DMN_STORE_URL: "fake:", HOME: "/home/test" },
 	configDir: "/nonexistent",
 });
+const now = new Date("2026-06-01T00:00:00Z");
 const cueFor = (organization: string): Cue => ({
 	organization,
 	project: "web",
@@ -24,7 +25,6 @@ const cueFor = (organization: string): Cue => ({
 let directory: string;
 let state: LocalState;
 let recalled: string[];
-let ids: Record<string, string>;
 const fake = new FakeStore();
 const store = {
 	retain: fake.retain.bind(fake),
@@ -39,17 +39,12 @@ const store = {
 
 beforeAll(async () => {
 	directory = mkdtempSync(join(tmpdir(), "dmn-recall-"));
-	state = new LocalState({ directory });
+	state = new LocalState({ directory, clock: () => now });
 	recalled = [];
 	for (const bank of ["org-acme", "org-initech", "generic"]) {
 		await fake.retain(bank, [{ content: `memory in ${bank}`, tags: ["project:web"] }]);
 	}
 	await fake.retain("generic", [{ content: "memory dormant in generic", tags: ["project:web"] }]);
-	ids = {};
-	for (const bank of ["org-acme", "org-initech", "generic"]) {
-		const [record] = await fake.list(bank, { limit: 1, offset: 0 });
-		ids[bank] = record?.id ?? "";
-	}
 });
 
 afterAll(() => {
@@ -58,9 +53,17 @@ afterAll(() => {
 });
 
 const texts = async (organization: string, prompt?: string) =>
-	(await recall({ store, state, config, cue: cueFor(organization), prompt, now: new Date() })).map(
-		(memory) => memory.text,
-	);
+	(
+		await recall({
+			store,
+			state,
+			config,
+			cue: cueFor(organization),
+			prompt,
+			random: () => 0.5,
+			now,
+		})
+	).map((memory) => memory.text);
 
 test("an organization cue queries exactly its bank and generic", async () => {
 	recalled = [];
@@ -75,7 +78,9 @@ test("a generic cue queries only generic", async () => {
 	recalled = [];
 	const result = await texts("generic");
 	expect(recalled).toEqual(["generic"]);
-	expect(result.every((text) => text.includes("generic"))).toBe(true);
+	expect(result).toContain("memory in generic");
+	expect(result).not.toContain("memory in org-acme");
+	expect(result).not.toContain("memory in org-initech");
 });
 
 test("a dormant memory never appears, even as the top store result", async () => {

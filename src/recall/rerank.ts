@@ -43,10 +43,12 @@ export function rerank(
 	return candidates
 		.map((memory) => {
 			const uses = state.uses(memory.id);
-			const created = Date.parse(memory.createdAt || uses.firstSeenAt || "");
-			const lifetimeHours = Number.isNaN(created)
-				? 0
-				: (now.getTime() - created) / millisecondsPerHour;
+			// First parseable of createdAt, then the state's firstSeenAt; otherwise now.
+			const created = [memory.createdAt, uses.firstSeenAt]
+				.map((value) => Date.parse(value ?? ""))
+				.find(Number.isFinite);
+			const lifetimeHours =
+				created === undefined ? 0 : (now.getTime() - created) / millisecondsPerHour;
 			// Creation counts as the first use.
 			const baseLevel = baseLevelActivation(uses.useCount + 1, lifetimeHours, parameters.decay);
 			const shared: CueSource[] = memory.tags

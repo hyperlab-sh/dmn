@@ -12,12 +12,11 @@ let clock: Date;
 let listTagsCalls: string[];
 const store = new FakeStore();
 const counted = {
-	...store,
 	listTags: (bank: string) => {
 		listTagsCalls.push(bank);
 		return store.listTags(bank);
 	},
-} as unknown as FakeStore;
+};
 
 beforeAll(async () => {
 	directory = mkdtempSync(join(tmpdir(), "dmn-fan-"));
@@ -38,17 +37,22 @@ afterAll(() => {
 test("sums per-tag counts across banks; the TTL spares the store, expiry hits it again", async () => {
 	listTagsCalls = [];
 	const banks = ["org-acme", "generic"];
-	const first = await fanCounts(counted, state, banks, clock, 300);
+	const first = await fanCounts(counted, state, banks, 300);
 	expect(first.get("stack:bun")).toBe(3);
 	expect(first.get("project:web")).toBe(1);
 	expect(first.get("kind:turn")).toBe(1);
 	expect(listTagsCalls.sort()).toEqual(["generic", "org-acme"]);
 
 	clock = new Date(clock.getTime() + 299_000);
-	expect(await fanCounts(counted, state, banks, clock, 300)).toEqual(first);
+	expect(await fanCounts(counted, state, banks, 300)).toEqual(first);
 	expect(listTagsCalls).toHaveLength(2);
 
 	clock = new Date(clock.getTime() + 2_000);
-	await fanCounts(counted, state, banks, clock, 300);
+	await fanCounts(counted, state, banks, 300);
 	expect(listTagsCalls).toHaveLength(4);
+});
+
+test("a failing listTags contributes nothing instead of rejecting", async () => {
+	const failing = { listTags: () => Promise.reject(new Error("down")) };
+	expect(await fanCounts(failing, state, ["unseen-bank"], 300)).toEqual(new Map());
 });
