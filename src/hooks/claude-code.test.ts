@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../config/config.js";
 import { FakeJudge } from "../judge/fake.js";
+import type { Classification, Judge, Judgement, KindJudge } from "../judge/types.js";
 import { LocalState } from "../state/state.js";
 import { FakeStore } from "../store/fake.js";
 import type { RecallQuery, RetainItem } from "../store/types.js";
@@ -312,6 +313,29 @@ test("a judge that fails costs the intrusive thought and warns", async () => {
 	});
 	expect(output).toBeNull();
 	expect(warnings.join("\n")).toContain("judge down");
+});
+
+test("a judge that hangs is abandoned at the hook's store limit and costs only the tags", async () => {
+	const transcript_path = cite("hang.jsonl", "Retries back off with jitter.");
+	// classify never settles; the deadline race is the only way this Stop returns.
+	const hanging: Judge & KindJudge = {
+		judge: () => new Promise<Judgement[]>(() => {}),
+		classify: () => new Promise<Classification[]>(() => {}),
+	};
+	const warnings: string[] = [];
+	const judged = new FakeStore();
+	await handleHookEvent(event({ hook_event_name: "Stop", transcript_path }), {
+		...deps,
+		// The store limit is the whole classify call's budget (a 5 ms real timer is the bound).
+		config: { ...deps.config, storeTimeoutMs: 5 },
+		store: judged,
+		judge: hanging,
+		onWarning: (message) => warnings.push(message),
+	});
+	expect(
+		(await judged.list("generic", { limit: 10, offset: 0 })).map((item) => item.tags.at(-1)),
+	).toEqual(["kind:turn", "kind:turn"]);
+	expect(warnings).toEqual([expect.stringContaining("deadline")]);
 });
 
 test("stop tags the retained turns with the judge's kinds at the configured bar; a failing judge only warns", async () => {
