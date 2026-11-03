@@ -65,12 +65,7 @@ export async function runHook(
 		const now = env.DMN_NOW ? new Date(env.DMN_NOW) : undefined;
 		if (now && Number.isNaN(now.getTime())) throw new Error("DMN_NOW is not an ISO date");
 		// Under DMN_NOW the use stamps follow the same clock as recall.
-		const state = now
-			? new (await import("../../state/state.js")).LocalState({
-					directory: config.stateDir,
-					clock: () => now,
-				})
-			: await openState(config);
+		const state = await openState(config, now && (() => now));
 		try {
 			const output = await handleHookEvent(event, {
 				store: createStore(config),

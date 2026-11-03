@@ -175,7 +175,7 @@ export function createStore(config: Config): MemoryStore {
 }
 
 /** Opens the local state. Loaded lazily so `bun:sqlite` is only needed by commands that use it. */
-export async function openState(config: Config): Promise<LocalState> {
+export async function openState(config: Config, clock?: () => Date): Promise<LocalState> {
 	const { LocalState } = await import("../state/state.js");
-	return new LocalState({ directory: config.stateDir });
+	return new LocalState({ directory: config.stateDir, ...(clock && { clock }) });
 }

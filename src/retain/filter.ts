@@ -12,7 +12,7 @@ const secretPatterns: RegExp[] = [
 	/\bnpm_[A-Za-z0-9]{36}\b/,
 	/\bsk-[A-Za-z0-9_-]{16,}/,
 	/\b[rs]k_(?:live|test)_[A-Za-z0-9]{16,}/,
-	/\bBasic\s+[A-Za-z0-9+/=]{16,}/,
+	/\b[Bb][Aa][Ss][Ii][Cc]\s+(?=[A-Za-z0-9+/=][A-Za-z0-9+/=]*[A-Z0-9+/=])[A-Za-z0-9+/=]{16,}/,
 	/\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/,
 	/\bBearer\s+[A-Za-z0-9._~+/=-]{16,}/i,
 	/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/,
