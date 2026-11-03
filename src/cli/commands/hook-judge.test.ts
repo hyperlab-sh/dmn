@@ -2,9 +2,10 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ConfigError, loadConfig } from "../../config/config.js";
 import { startFakeServer } from "../../store/fake.js";
 import { bankFor, HindsightStore } from "../../store/hindsight.js";
-import { runHook } from "./hook.js";
+import { hookJudge, runHook } from "./hook.js";
 
 const root = new URL("../../..", import.meta.url).pathname;
 const fixtures = join(root, "fixtures/hooks");
@@ -125,4 +126,17 @@ test("provider laya without LAYA_API_KEY is a config error: exit 2 for user-prom
 	const env = { HOME: scratch, DMN_STORE_URL: store.url, XDG_CONFIG_HOME: configHome };
 	expect(await runHook("user-prompt", env)).toBe(2);
 	expect(await runHook("post-tool", env)).toBe(1);
+});
+
+test("hookJudge builds no judge for Stop, or for post-tool with intrusions off, and throws without a key", () => {
+	const config = loadConfig({
+		env: { DMN_STORE_URL: "fake:", HOME: scratch },
+		configDir: join(scratch, "nokey", "dmn"),
+	});
+	expect(config.judge.provider).toBe("laya");
+	expect(hookJudge("Stop", config, {})).toBeUndefined();
+	expect(hookJudge("PostToolUse", { ...config, intrusionThreshold: null }, {})).toBeUndefined();
+	expect(() => hookJudge("UserPromptSubmit", config, {})).toThrow(ConfigError);
+	expect(() => hookJudge("PostToolUse", config, {})).toThrow(ConfigError);
+	expect(hookJudge("UserPromptSubmit", config, { LAYA_API_KEY: "k" })).toBeDefined();
 });

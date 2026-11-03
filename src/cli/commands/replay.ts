@@ -16,7 +16,7 @@ import type { MemoryStore } from "../../store/types.js";
 
 const usage = `Usage:
   dmn replay <transcript.jsonl>... [--store fake|<url>] [--out <dir>] [--top 5]
-             [--memories <json>] [--manifests <dir>] [--judge fake|laya]
+             [--memories <json>] [--manifests <dir>] [--judge fake|laya] [--threshold <p>]
   dmn replay score <run-dir> [--top 5]
   dmn replay judge <run-dir> [--threshold <p>] [--judge fake|laya]
 `;

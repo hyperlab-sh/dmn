@@ -157,6 +157,24 @@ test("with a judge the one chosen memory is judged and surfaces only at or above
 	).toBeNull();
 	expect(unansweredErrors).toHaveLength(1);
 
+	// A memory holding a secret is never sent to the judge, so it cannot surface.
+	const leaky = new FakeStore();
+	await leaky.retain("generic", [{ content: "key AKIAIOSFODNN7EXAMPLE for retry", tags: [] }]);
+	const spy = new FakeJudge({ probabilities: {} });
+	const hidden = await intrude({
+		store: leaky,
+		state,
+		config,
+		cue,
+		sessionId: "leaky",
+		toolName: "Read",
+		toolInput: { file_path: "/repo/retry.ts" },
+		random: () => 0.5,
+		judge: spy,
+	});
+	expect(hidden).toBeNull();
+	expect(spy.calls).toBe(0);
+
 	// A judge that fails costs the thought, and is reported.
 	const errors: unknown[] = [];
 	const failing = new FakeJudge({ failWith: new Error("down") });
