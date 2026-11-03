@@ -13,6 +13,7 @@ const candidate = (id: string, activation: number): RankedMemory => ({
 	baseLevel: activation,
 	spreading: 0,
 	noise: 0,
+	association: 0,
 });
 
 // Activation equal to the threshold is a probability of exactly 0.5: a draw below it wins.

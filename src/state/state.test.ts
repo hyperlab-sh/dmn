@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -77,4 +78,41 @@ test("intrusions count tool calls since the last emission, and a session without
 	expect(state.toolCallsSince("s2")).toBe(Number.POSITIVE_INFINITY);
 	state.markIntrusion("s1");
 	expect(state.toolCallsSince("s1")).toBe(0);
+});
+
+test("recordCoUse writes each pair once per turn, adds weight across turns and stamps last_at", () => {
+	now = at(0);
+	state.recordCoUse(["b", "a", "c"], "co-1");
+	state.recordCoUse(["b", "a", "c"], "co-1");
+	expect(state.associations("a")).toEqual([
+		{ id: "b", weight: 1 },
+		{ id: "c", weight: 1 },
+	]);
+	expect(state.associations("c")).toEqual([
+		{ id: "a", weight: 1 },
+		{ id: "b", weight: 1 },
+	]);
+	expect(state.associationFan("a")).toBe(2);
+	now = at(9);
+	state.recordCoUse(["a", "b"], "co-2");
+	expect(state.associations("a")).toEqual([
+		{ id: "b", weight: 2 },
+		{ id: "c", weight: 1 },
+	]);
+	const lastAt = (a: string, b: string) =>
+		new Database(join(directory, "nested", "state.sqlite"), { readonly: true })
+			.query<{ last_at: string }, [string, string]>(
+				"SELECT last_at FROM co_use WHERE a = ? AND b = ?",
+			)
+			.get(a, b)?.last_at;
+	expect(lastAt("a", "b")).toBe("2026-01-01T00:00:09.000Z");
+	expect(lastAt("a", "c")).toBe("2026-01-01T00:00:00.000Z");
+});
+
+test("recordCoUse with fewer than two distinct ids writes nothing", () => {
+	state.recordCoUse([], "co-3");
+	state.recordCoUse(["solo"], "co-3");
+	state.recordCoUse(["solo", "solo"], "co-3");
+	expect(state.associations("solo")).toEqual([]);
+	expect(state.associationFan("solo")).toBe(0);
 });

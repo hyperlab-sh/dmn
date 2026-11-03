@@ -68,7 +68,9 @@ test("report lists the cue, the excerpt and both top-5 lists; judgements are one
 	expect(report).toContain("cue: (generic, none, typescript, developer, test)");
 	expect(report).toContain("> Fix the failing parser test");
 	expect(report).toContain("store:");
-	expect(report).toMatch(/\d\. \S+ A=-?[\d.]+ \(B=-?[\d.]+ S=-?[\d.]+ noise=-?[\d.]+\)/);
+	expect(report).toMatch(
+		/\d\. \S+ A=-?[\d.]+ \(B=-?[\d.]+ S=-?[\d.]+ noise=-?[\d.]+ assoc=-?[\d.]+\)/,
+	);
 	expect(report.trimEnd().endsWith("## Summary\n\nunscored")).toBe(true);
 
 	const shown = result.entries.reduce(

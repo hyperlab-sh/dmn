@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS co_use (
 	a TEXT NOT NULL,
 	b TEXT NOT NULL,
 	weight REAL NOT NULL,
+	last_at TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (a, b)
 );
 CREATE TABLE IF NOT EXISTS intrusions (
@@ -63,6 +64,11 @@ export class LocalState {
 		this.database.exec("PRAGMA busy_timeout = 2000");
 		this.database.exec("PRAGMA journal_mode = WAL");
 		this.database.exec(schema);
+		// co_use shipped without last_at; add it to state files created before.
+		const columns = this.database.query<{ name: string }, []>("PRAGMA table_info(co_use)").all();
+		if (!columns.some((column) => column.name === "last_at")) {
+			this.database.exec("ALTER TABLE co_use ADD COLUMN last_at TEXT NOT NULL DEFAULT ''");
+		}
 	}
 
 	close(): void {
@@ -100,6 +106,51 @@ export class LocalState {
 				)
 				.run(memoryId, at, at);
 		})();
+	}
+
+	/**
+	 * Strengthens the association of every pair of distinct ids cited in one turn (weight += 1,
+	 * `a < b`). A repeat for the same turn is ignored; fewer than two ids write nothing.
+	 */
+	recordCoUse(ids: ReadonlyArray<string>, turnId: string): void {
+		const unique = [...new Set(ids)].sort();
+		if (unique.length < 2) return;
+		const at = this.clock().toISOString();
+		this.database.transaction(() => {
+			for (let i = 0; i < unique.length; i++) {
+				for (let j = i + 1; j < unique.length; j++) {
+					const a = unique[i] as string;
+					const b = unique[j] as string;
+					// Ids never contain ":", so a pair key cannot collide with a memory id.
+					const inserted = this.database
+						.query("INSERT OR IGNORE INTO use_events (memory_id, turn_id, at) VALUES (?, ?, ?)")
+						.run(`co:${a}:${b}`, turnId, at);
+					if (inserted.changes === 0) continue;
+					this.database
+						.query(
+							`INSERT INTO co_use (a, b, weight, last_at) VALUES (?, ?, 1, ?)
+							 ON CONFLICT (a, b) DO UPDATE SET weight = weight + 1, last_at = excluded.last_at`,
+						)
+						.run(a, b, at);
+				}
+			}
+		})();
+	}
+
+	/** The memories co-cited with `memoryId` and the strength of each association. */
+	associations(memoryId: string): { id: string; weight: number }[] {
+		return this.database
+			.query<{ id: string; weight: number }, [string, string]>(
+				`SELECT b AS id, weight FROM co_use WHERE a = ?
+				 UNION ALL SELECT a AS id, weight FROM co_use WHERE b = ?
+				 ORDER BY id`,
+			)
+			.all(memoryId, memoryId);
+	}
+
+	/** How many memories are associated with `memoryId`. */
+	associationFan(memoryId: string): number {
+		return this.associations(memoryId).length;
 	}
 
 	isDormant(memoryId: string): boolean {
