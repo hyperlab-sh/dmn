@@ -110,10 +110,6 @@ test("user-prompt injects, and prints nothing when no memory matches", async () 
 	expect(empty).toMatchObject({ stdout: "", exitCode: 0 });
 });
 
-test("post-tool prints nothing", async () => {
-	expect(await run("post-tool", "post-tool.json")).toMatchObject({ stdout: "", exitCode: 0 });
-});
-
 test("stop retains both turns with the cue's tags and counts no uncited or unknown memory", async () => {
 	expect(await run("stop", "stop.json")).toMatchObject({ stdout: "", exitCode: 0 });
 	const turns = (await store.list(bankFor("acme"), { limit: 20, offset: 0 })).filter((memory) =>

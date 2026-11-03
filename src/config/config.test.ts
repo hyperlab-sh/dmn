@@ -96,3 +96,15 @@ test("throws ConfigError for a mistyped value, a mistyped or an unknown activati
 	expect(() => loadConfig({ env, configDir: badActivationDir })).toThrow(/activation\.decay/);
 	expect(() => loadConfig({ env, configDir: unknownActivationDir })).toThrow(/activation\.decya/);
 });
+
+test("intrusionThreshold accepts null to turn intrusive thoughts off, and rejects anything else", () => {
+	const load = (intrusionThreshold: unknown) => {
+		const dir = join(root, `intrusion-${String(intrusionThreshold)}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "config.json"), JSON.stringify({ intrusionThreshold }));
+		return loadConfig({ env, configDir: dir });
+	};
+	expect(load(null).intrusionThreshold).toBeNull();
+	expect(load(1.5).intrusionThreshold).toBe(1.5);
+	expect(() => load("high")).toThrow(ConfigError);
+});

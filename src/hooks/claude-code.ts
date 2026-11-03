@@ -2,6 +2,7 @@ import type { Config } from "../config/config.js";
 import { buildCue, type Cue } from "../cue/cue.js";
 import { scanCueInput } from "../cue/scan.js";
 import { formatInjection } from "../recall/inject.js";
+import { intrude } from "../recall/intrude.js";
 import { recall } from "../recall/pipeline.js";
 import { retainTurns } from "../retain/retain.js";
 import { countCitedUses } from "../retain/uses.js";
@@ -160,7 +161,31 @@ async function finishTurn(event: HookEvent, deps: HookDeps): Promise<HookOutput>
 	return null;
 }
 
-/** One branch per event. `PostToolUse` only parses today; the intrusive path extends it. */
+/** After a tool call, rarely, one memory as a single line; nothing otherwise. */
+async function intrusiveThought(event: HookEvent, deps: HookDeps): Promise<HookOutput> {
+	const { store, state, config, random, now, onWarning } = deps;
+	const memory = await intrude({
+		store,
+		state,
+		config,
+		cue: cueFor(event, config),
+		sessionId: event.sessionId,
+		toolName: event.toolName ?? "",
+		toolInput: event.toolInput,
+		...(onWarning && {
+			onFanError: (bank: string, error: unknown) =>
+				onWarning(`dmn: tag counts for bank ${bank} unavailable: ${(error as Error).message}`),
+		}),
+		...(random && { random }),
+		...(now && { now }),
+	});
+	if (!memory) return null;
+	const additionalContext = formatInjection([memory], config.budgetTokens);
+	if (!additionalContext) return null;
+	return { hookSpecificOutput: { hookEventName: event.name, additionalContext } };
+}
+
+/** One branch per event. */
 export async function handleHookEvent(event: HookEvent, deps: HookDeps): Promise<HookOutput> {
 	switch (event.name) {
 		case "SessionStart":
@@ -169,6 +194,6 @@ export async function handleHookEvent(event: HookEvent, deps: HookDeps): Promise
 		case "Stop":
 			return finishTurn(event, deps);
 		case "PostToolUse":
-			return null;
+			return intrusiveThought(event, deps);
 	}
 }

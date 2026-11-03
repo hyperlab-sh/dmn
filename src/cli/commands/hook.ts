@@ -14,7 +14,7 @@ const eventBySubcommand: Record<string, HookEventName> = {
 };
 
 /** Small seeded generator (mulberry32) so a session's noise is stable and tests are exact. */
-function seededRandom(seed: string): () => number {
+export function seededRandom(seed: string): () => number {
 	let state = 2166136261;
 	for (const character of seed) state = Math.imul(state ^ character.charCodeAt(0), 16777619);
 	return () => {
@@ -60,8 +60,6 @@ export async function runHook(
 		if (event.name !== expected) {
 			throw new HookEventError(`hook ${subcommand} received a ${event.name} event`);
 		}
-		// Nothing to do until the intrusive path lands: no state, no store.
-		if (event.name === "PostToolUse") return 0;
 		const now = env.DMN_NOW ? new Date(env.DMN_NOW) : undefined;
 		if (now && Number.isNaN(now.getTime())) throw new Error("DMN_NOW is not an ISO date");
 		// Under DMN_NOW the use stamps follow the same clock as recall.

@@ -17,21 +17,21 @@ with status 2 and names it.
 
 Located at `$XDG_CONFIG_HOME/dmn/config.json`. Every key is optional.
 
-| Key                  | Default                                        | Meaning                                                                 |
-| -------------------- | ---------------------------------------------- | ----------------------------------------------------------------------- |
-| `budgetTokens`       | `600`                                          | Token budget of one injection (one token per four characters).          |
-| `topK`               | `10`                                           | Candidates fetched per bank before reranking.                           |
-| `promptThreshold`    | `-0.5`                                         | Reserved for prompt-time filtering by activation.                       |
-| `intrusionThreshold` | `0.5`                                          | Reserved for the intrusive path.                                        |
-| `intrusionCooldown`  | `5`                                            | Reserved for the intrusive path.                                        |
-| `dormancyFloor`      | `-2.0`                                         | Base-level activation below which a memory may go dormant.              |
-| `protectedTags`      | `decision`, `correction`, `identity`, `person` | Tags that keep a memory from going dormant.                             |
-| `organizations`      | `{}`                                           | Maps the directory a hyper space sits under to an organization (below). |
-| `storeTimeoutMs`     | `2000`                                         | Per-request limit for recall, so a hung store cannot stall a prompt.    |
-| `retainTimeoutMs`    | `60000`                                        | Limit for retain, which waits on fact extraction.                       |
-| `fanCacheSeconds`    | `300`                                          | How long tag counts are cached.                                         |
-| `replayDir`          | `$XDG_DATA_HOME/dmn/replay`                    | Where replay runs are written.                                          |
-| `activation`         | ACT-R defaults                                 | Overrides for the activation parameters.                                |
+| Key                  | Default                                        | Meaning                                                                               |
+| -------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `budgetTokens`       | `600`                                          | Token budget of one injection (one token per four characters).                        |
+| `topK`               | `10`                                           | Candidates fetched per bank before reranking.                                         |
+| `promptThreshold`    | `-0.5`                                         | Reserved for prompt-time filtering by activation.                                     |
+| `intrusionThreshold` | `0.5`                                          | Retrieval-probability threshold of intrusive thoughts; `null` turns them off (below). |
+| `intrusionCooldown`  | `5`                                            | Tool calls a session must make after an intrusive thought before the next.            |
+| `dormancyFloor`      | `-2.0`                                         | Base-level activation below which a memory may go dormant.                            |
+| `protectedTags`      | `decision`, `correction`, `identity`, `person` | Tags that keep a memory from going dormant.                                           |
+| `organizations`      | `{}`                                           | Maps the directory a hyper space sits under to an organization (below).               |
+| `storeTimeoutMs`     | `2000`                                         | Per-request limit for recall, so a hung store cannot stall a prompt.                  |
+| `retainTimeoutMs`    | `60000`                                        | Limit for retain, which waits on fact extraction.                                     |
+| `fanCacheSeconds`    | `300`                                          | How long tag counts are cached.                                                       |
+| `replayDir`          | `$XDG_DATA_HOME/dmn/replay`                    | Where replay runs are written.                                                        |
+| `activation`         | ACT-R defaults                                 | Overrides for the activation parameters.                                              |
 
 ### Organizations
 
@@ -52,12 +52,28 @@ the organization is `generic`.
 With that file, a session in `/work/lab/some-space/...` recalls from the `hyperlab` bank and the
 `generic` bank, never from `mosaic`. The mapping is configuration; nothing is hard-coded.
 
+## Intrusive thoughts
+
+A developer sometimes remembers something when a file opens or a test fails, without asking.
+After a tool call, `dmn hook post-tool` runs the prompt-time recall keyed by the tool's target (a
+file's name and directory, or a command's first plain words) and the session's cue, keeping the
+top 3 candidates. The best one surfaces as a single line, `[m:<id>] <text>`, only when its
+retrieval probability against `intrusionThreshold` beats a random draw. Most calls print nothing.
+
+- `intrusionThreshold` (default `0.5`): a memory whose activation equals it surfaces half the
+  time; a higher value makes intrusions rarer. It is higher than prompt-time recall on purpose.
+- `intrusionCooldown` (default `5`): after a thought, this many tool calls pass before the next can surface. A session with no thought yet is never in cooldown.
+- To turn intrusive thoughts off, set `"intrusionThreshold": null`. The hook then neither
+  recalls nor prints.
+
+A surfaced thought is not a use: it counts only if the assistant cites its marker later.
+
 ## Install
 
 1. Start a store and export `DMN_STORE_URL` in the environment Claude Code runs in.
 2. Run `dmn install`. It adds four command hooks to `~/.claude/settings.json` (under
    `$CLAUDE_CONFIG_DIR` when that is set, or the file given with `--settings <path>`): `SessionStart` and `UserPromptSubmit` inject memories,
-   `PostToolUse` is reserved for the intrusive path, `Stop` retains the last turns and counts
+   `PostToolUse` may surface an intrusive thought, `Stop` retains the last turns and counts
    cited memories. Running it again changes nothing; other hooks and keys are kept.
 3. Restart Claude Code.
 

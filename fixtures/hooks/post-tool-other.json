@@ -1,0 +1,9 @@
+{
+	"session_id": "session-1",
+	"transcript_path": "__TRANSCRIPT__",
+	"cwd": "__CWD__",
+	"hook_event_name": "PostToolUse",
+	"tool_name": "WebSearch",
+	"tool_input": { "query": "retry jitter" },
+	"tool_response": { "results": [] }
+}
