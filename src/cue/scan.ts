@@ -1,4 +1,12 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import {
+	closeSync,
+	existsSync,
+	fstatSync,
+	openSync,
+	readdirSync,
+	readFileSync,
+	readSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { CueInput } from "./cue.js";
 import { type Manifest, manifestExtensions, manifestFileNames } from "./stack.js";
@@ -34,7 +42,9 @@ function readOrigin(repositoryRoot: string): string | undefined {
 			"remote.origin.url",
 		]);
 		if (result.exitCode !== 0) return undefined;
-		return result.stdout.toString().trim() || undefined;
+		const url = result.stdout.toString().trim();
+		// Drop userinfo: https remotes often embed a personal access token.
+		return url ? url.replace(/\/\/[^@/]+@/, "//") : undefined;
 	} catch {
 		return undefined;
 	}
@@ -65,6 +75,28 @@ function readManifests(directories: string[]): Manifest[] {
 	return manifests;
 }
 
+/** The end of the file holding at least `transcriptTailLines` lines, without reading all of it. */
+function readTail(path: string): string {
+	const descriptor = openSync(path, "r");
+	try {
+		const size = fstatSync(descriptor).size;
+		let length = 256 * 1024;
+		for (;;) {
+			const start = Math.max(0, size - length);
+			const buffer = Buffer.alloc(size - start);
+			readSync(descriptor, buffer, 0, buffer.length, start);
+			const text = buffer.toString("utf8");
+			if (start === 0 || text.split("\n").length > transcriptTailLines + 1) {
+				// A cut start may split the first line (and a UTF-8 character): drop it.
+				return start === 0 ? text : text.slice(text.indexOf("\n") + 1);
+			}
+			length *= 2;
+		}
+	} finally {
+		closeSync(descriptor);
+	}
+}
+
 type TranscriptFacts = { activeSkill?: string; recentTools: string[] };
 
 function readTranscript(transcriptPath: string | undefined): TranscriptFacts {
@@ -72,7 +104,7 @@ function readTranscript(transcriptPath: string | undefined): TranscriptFacts {
 	if (!transcriptPath) return facts;
 	let lines: string[];
 	try {
-		lines = readFileSync(transcriptPath, "utf8").split("\n").filter(Boolean);
+		lines = readTail(transcriptPath).split("\n").filter(Boolean);
 	} catch {
 		return facts;
 	}
@@ -92,8 +124,11 @@ function readTranscript(transcriptPath: string | undefined): TranscriptFacts {
 			const input = block.input ?? {};
 			if (block.name === "Skill" && typeof input.skill === "string")
 				facts.activeSkill = input.skill;
+			// Only whether a command mentions "test" is kept: commands may carry secrets.
 			const detail =
-				block.name === "Bash" && typeof input.command === "string" ? `:${input.command}` : "";
+				block.name === "Bash" && typeof input.command === "string" && /test/i.test(input.command)
+					? ":test"
+					: "";
 			facts.recentTools.push(`${block.name}${detail}`);
 		}
 	}

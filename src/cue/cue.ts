@@ -44,7 +44,7 @@ const taskBySkill: Record<string, Task> = {
 };
 
 /** `owner` and `repo` of a GitHub remote URL (https, ssh or scp-like). */
-export function parseGithubOrigin(url: string): { owner: string; repo: string } | undefined {
+function parseGithubOrigin(url: string): { owner: string; repo: string } | undefined {
 	const match = /github\.com[:/]+([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/.exec(url.trim());
 	return match?.[1] && match[2] ? { owner: match[1], repo: match[2] } : undefined;
 }
@@ -58,9 +58,12 @@ function skillKey(skill: string | undefined): string | undefined {
 function resolveWhere(input: CueInput): { organization: string; project: string } {
 	const origin = input.originUrl ? parseGithubOrigin(input.originUrl) : undefined;
 	if (input.spaceRoot) {
-		const space = input.spaceRoot.replace(/\/+$/, "").split("/").pop() || "none";
+		const segments = input.spaceRoot.split("/").filter(Boolean);
+		const space = segments.pop() || "none";
+		// The mapping key is the directory the space sits under, not the space itself.
+		const root = segments.pop() ?? "";
 		return {
-			organization: input.organizations[space] ?? origin?.owner ?? space,
+			organization: input.organizations[root] ?? origin?.owner ?? "generic",
 			project: space,
 		};
 	}
