@@ -314,7 +314,7 @@ test("a judge that fails costs the intrusive thought and warns", async () => {
 	expect(warnings.join("\n")).toContain("judge down");
 });
 
-test("stop tags the retained turns with the judge's kinds, and a judge that fails only warns", async () => {
+test("stop tags the retained turns with the judge's kinds at the configured bar; a failing judge only warns", async () => {
 	const transcript_path = cite("kinds.jsonl", "Retries back off with jitter, capped at five.");
 	const userText = "What did we say?";
 
@@ -334,6 +334,23 @@ test("stop tags the retained turns with the judge's kinds, and a judge that fail
 		["Retries back off with jitter, capped at five.", "kind:turn"],
 	]);
 
+	// 0.7 clears retainTurns' own default (0.5) but not the configured bar: only config's
+	// kindThreshold can drop it here, and 0.9 clears it.
+	const atConfiguredBar = async (probability: number) => {
+		const judged = new FakeStore();
+		await handleHookEvent(event({ hook_event_name: "Stop", transcript_path }), {
+			...deps,
+			config: { ...deps.config, judge: { ...deps.config.judge, kindThreshold: 0.8 } },
+			store: judged,
+			judge: new FakeJudge({
+				kinds: { [userText]: { kind: "learning", probability } },
+			}),
+		});
+		return (await judged.list("generic", { limit: 10, offset: 0 })).map((item) => item.tags.at(-1));
+	};
+	expect(await atConfiguredBar(0.7)).toEqual(["kind:turn", "kind:turn"]);
+	expect(await atConfiguredBar(0.9)).toEqual(["kind:learning", "kind:turn"]);
+
 	const warnings: string[] = [];
 	const failing = new FakeStore();
 	await handleHookEvent(event({ hook_event_name: "Stop", transcript_path }), {
@@ -345,5 +362,5 @@ test("stop tags the retained turns with the judge's kinds, and a judge that fail
 	expect(
 		(await failing.list("generic", { limit: 10, offset: 0 })).map((item) => item.tags.at(-1)),
 	).toEqual(["kind:turn", "kind:turn"]);
-	expect(warnings).toEqual(["dmn: judge: judge down"]);
+	expect(warnings).toEqual([expect.stringContaining("judge down")]);
 });

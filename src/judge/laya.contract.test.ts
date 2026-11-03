@@ -25,10 +25,15 @@ test.skipIf(!apiKey)(
 	"classifies a session-only exchange as turn and a stated environment fact as learning or decision",
 	async () => {
 		const judge = new LayaJudge({ apiKey: apiKey as string, timeoutMs: 30_000 });
-		const [exchange, fact] = await judge.classify([
+		const out = await judge.classify([
 			"Could you re-run the tests now? They were flaky a moment ago on my machine but not on yours.",
 			"The memory store runs on the forge host on port 8888; DMN_STORE_URL must point at it.",
 		]);
+		// classify leaves refused items out: look each answer up by its input index.
+		const exchange = out.find((classification) => classification.index === 0);
+		const fact = out.find((classification) => classification.index === 1);
+		expect(exchange).toBeDefined();
+		expect(fact).toBeDefined();
 		expect(exchange?.kind).toBe("turn");
 		expect(fact?.kind === "learning" || fact?.kind === "decision").toBe(true);
 	},
