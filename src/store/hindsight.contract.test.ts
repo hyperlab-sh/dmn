@@ -5,7 +5,11 @@ const storeUrl = process.env.DMN_STORE_URL;
 
 describe.skipIf(!storeUrl)("Hindsight contract (needs DMN_STORE_URL)", () => {
 	test("retain three tagged items, recall by one tag, list tag counts", async () => {
-		const store = new HindsightStore({ baseUrl: storeUrl ?? "" });
+		const store = new HindsightStore({
+			baseUrl: storeUrl ?? "",
+			timeoutMs: 30_000,
+			retainTimeoutMs: 100_000,
+		});
 		const bank = `contract-${crypto.randomUUID().slice(0, 8)}`;
 		const suffix = crypto.randomUUID().slice(0, 8);
 		const tags = [`one:${suffix}`, `two:${suffix}`, `three:${suffix}`];

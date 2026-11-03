@@ -103,6 +103,11 @@ export class FakeStore implements MemoryStore {
 		};
 	}
 
+	/** True once anything was retained into the bank. */
+	hasBank(bank: string): boolean {
+		return this.banks.has(bank);
+	}
+
 	async listTags(bank: string): Promise<TagCount[]> {
 		const counts = new Map<string, number>();
 		for (const record of this.banks.get(bank) ?? []) {
@@ -193,6 +198,8 @@ export function startFakeServer(): { url: string; stop: () => void } {
 				return Response.json({ items: page.items.map(wire), total: page.total, limit, offset });
 			}
 			if (request.method === "GET" && path === "/tags") {
+				if (!store.hasBank(bank))
+					return Response.json({ detail: "bank not found" }, { status: 404 });
 				const all = await store.listTags(bank);
 				const limit = Number(url.searchParams.get("limit") ?? 100);
 				const offset = Number(url.searchParams.get("offset") ?? 0);

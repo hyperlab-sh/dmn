@@ -7,6 +7,7 @@ const bank = "org-acme";
 let server: ReturnType<typeof startFakeServer>;
 let store: HindsightStore;
 let recalled: MemoryRecord[];
+let oddServer: ReturnType<typeof Bun.serve>;
 
 beforeAll(async () => {
 	server = startFakeServer();
@@ -25,7 +26,21 @@ beforeAll(async () => {
 	});
 });
 
-afterAll(() => server.stop());
+beforeAll(() => {
+	oddServer = Bun.serve({
+		port: 0,
+		hostname: "127.0.0.1",
+		fetch(request) {
+			if (request.url.endsWith("/memories/hang")) return new Promise<Response>(() => {});
+			return Response.json({ id: "x", text: "no timestamp" });
+		},
+	});
+});
+
+afterAll(() => {
+	server.stop();
+	oddServer.stop(true);
+});
 
 test("recall orders by keyword overlap, ties by insertion order", async () => {
 	expect(recalled.map((record) => record.text)).toEqual([
@@ -99,11 +114,23 @@ test("listTags counts tags per bank", async () => {
 	const tags = await store.listTags(bank);
 	expect(tags).toContainEqual({ tag: "project:api", count: 3 });
 	expect(tags).toContainEqual({ tag: "project:web", count: 1 });
-	expect(await store.listTags("generic")).toEqual([]);
+	expect(await store.listTags("never-written")).toEqual([]);
 });
 
 test("a wrong base URL is an error for list and listTags, not an empty store", async () => {
 	const wrong = new HindsightStore({ baseUrl: `${server.url}/prefix` });
 	await expect(wrong.list(bank, { limit: 1, offset: 0 })).rejects.toBeInstanceOf(StoreError);
 	await expect(wrong.listTags(bank)).rejects.toBeInstanceOf(StoreError);
+});
+
+test("a hung store aborts at timeoutMs as a StoreError with status 0", async () => {
+	const hung = new HindsightStore({ baseUrl: `http://127.0.0.1:${oddServer.port}`, timeoutMs: 50 });
+	const error = await hung.get(bank, "hang").catch((caught: unknown) => caught);
+	expect(error).toBeInstanceOf(StoreError);
+	expect((error as StoreError).status).toBe(0);
+});
+
+test("a record without any timestamp is a StoreError, not an empty createdAt", async () => {
+	const odd = new HindsightStore({ baseUrl: `http://127.0.0.1:${oddServer.port}` });
+	await expect(odd.get(bank, "x")).rejects.toThrow(/no timestamp/);
 });

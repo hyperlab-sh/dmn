@@ -27,6 +27,7 @@ export interface Config {
 	replayDir: string;
 	stateDir: string;
 	storeTimeoutMs: number;
+	retainTimeoutMs: number;
 	activation: ActivationParameters;
 }
 
@@ -44,6 +45,7 @@ const numberKeys = [
 	"intrusionCooldown",
 	"dormancyFloor",
 	"storeTimeoutMs",
+	"retainTimeoutMs",
 ] as const;
 
 function xdgDirectory(env: LoadConfigOptions["env"], variable: string, fallback: string): string {
@@ -105,6 +107,7 @@ export function loadConfig(options: LoadConfigOptions): Config {
 		replayDir: join(xdgDirectory(env, "XDG_DATA_HOME", ".local/share"), "replay"),
 		stateDir: xdgDirectory(env, "XDG_STATE_HOME", ".local/state"),
 		storeTimeoutMs: 2000,
+		retainTimeoutMs: 60_000,
 		activation: { ...defaultActivationParameters },
 	};
 
@@ -161,7 +164,11 @@ export function loadConfig(options: LoadConfigOptions): Config {
  */
 export function createStore(config: Config): MemoryStore {
 	if (config.storeUrl === "fake:") return new FakeStore();
-	return new HindsightStore({ baseUrl: config.storeUrl, timeoutMs: config.storeTimeoutMs });
+	return new HindsightStore({
+		baseUrl: config.storeUrl,
+		timeoutMs: config.storeTimeoutMs,
+		retainTimeoutMs: config.retainTimeoutMs,
+	});
 }
 
 /** Opens the local state. Loaded lazily so `bun:sqlite` is only needed by commands that use it. */

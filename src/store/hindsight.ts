@@ -34,6 +34,8 @@ export interface HindsightOptions {
 	baseUrl: string;
 	/** Per-request limit, so a hung store cannot stall a hook. Default 2000. */
 	timeoutMs?: number;
+	/** Limit for retain, which waits on LLM fact extraction. Default 60000. */
+	retainTimeoutMs?: number;
 }
 
 interface WireMemory {
@@ -75,8 +77,10 @@ function toRecord(wire: WireMemory): MemoryRecord {
 export class HindsightStore implements MemoryStore {
 	private readonly baseUrl: string;
 	private readonly timeoutMs: number;
+	private readonly retainTimeoutMs: number;
 
-	constructor({ baseUrl, timeoutMs = 2000 }: HindsightOptions) {
+	constructor({ baseUrl, timeoutMs = 2000, retainTimeoutMs = 60_000 }: HindsightOptions) {
+		this.retainTimeoutMs = retainTimeoutMs;
 		this.baseUrl = baseUrl.replace(/\/+$/, "");
 		this.timeoutMs = timeoutMs;
 	}
@@ -86,8 +90,13 @@ export class HindsightStore implements MemoryStore {
 		return `${this.baseUrl}/v1/default/banks/${encodeURIComponent(bank)}${path}${query}`;
 	}
 
-	private async request<T>(method: "GET" | "POST", url: string, body?: unknown): Promise<T> {
-		const init: RequestInit = { method, signal: AbortSignal.timeout(this.timeoutMs) };
+	private async request<T>(
+		method: "GET" | "POST",
+		url: string,
+		body?: unknown,
+		timeoutMs: number = this.timeoutMs,
+	): Promise<T> {
+		const init: RequestInit = { method, signal: AbortSignal.timeout(timeoutMs) };
 		if (body !== undefined) {
 			init.headers = { "content-type": "application/json" };
 			init.body = JSON.stringify(body);
@@ -115,7 +124,12 @@ export class HindsightStore implements MemoryStore {
 			...(item.metadata !== undefined && { metadata: item.metadata }),
 			...(item.documentId !== undefined && { document_id: item.documentId }),
 		}));
-		await this.request("POST", this.url(bank, "/memories"), { items: wireItems, async: false });
+		await this.request(
+			"POST",
+			this.url(bank, "/memories"),
+			{ items: wireItems, async: false },
+			this.retainTimeoutMs,
+		);
 	}
 
 	async recall(bank: string, query: RecallQuery): Promise<MemoryRecord[]> {
@@ -147,6 +161,8 @@ export class HindsightStore implements MemoryStore {
 	async list(bank: string, query: ListQuery): Promise<MemoryRecord[]> {
 		const params = new URLSearchParams();
 		for (const tag of query.tags ?? []) params.append("tags", tag);
+		// Hindsight defaults to `any`, which also returns untagged memories; match the fake.
+		params.set("tags_match", "any_strict");
 		params.set("limit", String(query.limit));
 		params.set("offset", String(query.offset));
 		const response = await this.request<{ items: WireMemory[] }>(

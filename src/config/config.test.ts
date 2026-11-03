@@ -54,6 +54,7 @@ test("returns the documented defaults when config.json is absent", () => {
 		replayDir: "/home/test/.local/share/dmn/replay",
 		stateDir: "/home/test/.local/state/dmn",
 		storeTimeoutMs: 2000,
+		retainTimeoutMs: 60_000,
 		activation: { ...defaultActivationParameters },
 	});
 });
