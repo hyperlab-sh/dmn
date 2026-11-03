@@ -24,7 +24,7 @@ type Hook = { stdout: string; stderr: string; exitCode: number; elapsed: number 
 async function run(
 	sub: string,
 	fixture: string,
-	fields: { cwd?: string; transcript?: string } = {},
+	fields: { cwd?: string; transcript?: string; stateHome?: string } = {},
 ): Promise<Hook> {
 	const input = readFileSync(join(fixtures, fixture), "utf8")
 		.replace("__CWD__", fields.cwd ?? space)
@@ -33,7 +33,7 @@ async function run(
 	// Async spawn: the fake server lives in this process and must keep answering.
 	const child = Bun.spawn(["bun", "src/cli/index.ts", "hook", sub], {
 		cwd: root,
-		env,
+		env: fields.stateHome ? { ...env, XDG_STATE_HOME: fields.stateHome } : env,
 		stdin: Buffer.from(input),
 		stdout: "pipe",
 		stderr: "pipe",
@@ -46,6 +46,29 @@ async function run(
 	const elapsed = performance.now() - started;
 	expect(elapsed).toBeLessThan(2000);
 	return { stdout, stderr, exitCode, elapsed };
+}
+
+/** Writes a one-turn transcript whose assistant text is `text`; returns its path. */
+function transcriptFor(name: string, text: string): string {
+	const path = join(scratch, name);
+	writeFileSync(
+		path,
+		[
+			{
+				type: "user",
+				uuid: `u-${name}`,
+				message: { role: "user", content: "What did we decide?" },
+			},
+			{
+				type: "assistant",
+				uuid: `a-${name}`,
+				message: { role: "assistant", content: [{ type: "text", text }] },
+			},
+		]
+			.map((entry) => JSON.stringify(entry))
+			.join("\n"),
+	);
+	return path;
 }
 
 const injected = (hook: Hook): string[] => {
@@ -144,20 +167,7 @@ test("a memory cited at stop ranks above the others on the next prompt", async (
 		markerIds(injected(await hook)).filter((id) => seeded.has(id as string));
 	const before = await order(run("user-prompt", "user-prompt.json"));
 	const target = ids["Sync worker retries are capped at five attempts."] as string;
-	const transcript = join(scratch, "cited.jsonl");
-	writeFileSync(
-		transcript,
-		[
-			{ type: "user", uuid: "u-x", message: { role: "user", content: "What did we decide?" } },
-			{
-				type: "assistant",
-				uuid: "a-x",
-				message: { role: "assistant", content: [{ type: "text", text: `As [m:${target}] says.` }] },
-			},
-		]
-			.map((entry) => JSON.stringify(entry))
-			.join("\n"),
-	);
+	const transcript = transcriptFor("cited.jsonl", `As [m:${target}] says.`);
 	await run("stop", "stop.json", { transcript });
 	const after = await order(run("user-prompt", "user-prompt.json"));
 	// Pinned: under DMN_SEED and DMN_NOW the cited memory starts second.
@@ -181,32 +191,21 @@ test("stop records a co-use edge for two cited memories once, and none for one",
 		ids["Retry delays in the sync worker use jitter."],
 		ids["The sync worker logs every retry delay."],
 	] as [string, string];
-	const transcriptFor = (name: string, text: string) => {
-		const path = join(scratch, name);
-		writeFileSync(
-			path,
-			[
-				{ type: "user", uuid: `u-${name}`, message: { role: "user", content: "Which?" } },
-				{
-					type: "assistant",
-					uuid: `a-${name}`,
-					message: { role: "assistant", content: [{ type: "text", text }] },
-				},
-			]
-				.map((entry) => JSON.stringify(entry))
-				.join("\n"),
-		);
-		return path;
-	};
+	// Its own state directory: the rank-pinning test above must not see these uses or edges.
+	const stateHome = join(scratch, "state-co-use");
 	const pair = transcriptFor("pair.jsonl", `Both [m:${a}] and [m:${b}] apply.`);
-	await run("stop", "stop.json", { transcript: pair });
-	await run("stop", "stop.json", { transcript: pair });
-	await run("stop", "stop.json", { transcript: transcriptFor("one.jsonl", `Only [m:${a}].`) });
-	const state = new LocalState({ directory: join(scratch, "state", "dmn") });
+	const one = transcriptFor("one.jsonl", `Only [m:${a}].`);
+	await run("stop", "stop.json", { transcript: pair, stateHome });
+	await run("stop", "stop.json", { transcript: pair, stateHome });
+	await run("stop", "stop.json", { transcript: one, stateHome });
+	const state = new LocalState({ directory: join(stateHome, "dmn") });
 	try {
 		const [low, high] = [a, b].sort() as [string, string];
 		expect(state.associations(low)).toEqual([{ id: high, weight: 1 }]);
 		expect(state.associationFan(a)).toBe(1);
+		// The repeated pair stop counted no extra use: pair turn + one-id turn for a, pair turn for b.
+		expect(state.uses(a).useCount).toBe(2);
+		expect(state.uses(b).useCount).toBe(1);
 	} finally {
 		state.close();
 	}

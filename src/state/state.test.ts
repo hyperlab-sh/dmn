@@ -99,14 +99,19 @@ test("recordCoUse writes each pair once per turn, adds weight across turns and s
 		{ id: "b", weight: 2 },
 		{ id: "c", weight: 1 },
 	]);
-	const lastAt = (a: string, b: string) =>
-		new Database(join(directory, "nested", "state.sqlite"), { readonly: true })
-			.query<{ last_at: string }, [string, string]>(
-				"SELECT last_at FROM co_use WHERE a = ? AND b = ?",
-			)
-			.get(a, b)?.last_at;
-	expect(lastAt("a", "b")).toBe("2026-01-01T00:00:09.000Z");
-	expect(lastAt("a", "c")).toBe("2026-01-01T00:00:00.000Z");
+	const reader = new Database(join(directory, "nested", "state.sqlite"), { readonly: true });
+	try {
+		const lastAt = (a: string, b: string) =>
+			reader
+				.query<{ last_at: string }, [string, string]>(
+					"SELECT last_at FROM co_use WHERE a = ? AND b = ?",
+				)
+				.get(a, b)?.last_at;
+		expect(lastAt("a", "b")).toBe("2026-01-01T00:00:09.000Z");
+		expect(lastAt("a", "c")).toBe("2026-01-01T00:00:00.000Z");
+	} finally {
+		reader.close();
+	}
 });
 
 test("recordCoUse with fewer than two distinct ids writes nothing", () => {
@@ -115,4 +120,40 @@ test("recordCoUse with fewer than two distinct ids writes nothing", () => {
 	state.recordCoUse(["solo", "solo"], "co-3");
 	expect(state.associations("solo")).toEqual([]);
 	expect(state.associationFan("solo")).toBe(0);
+});
+
+test("opening a state file whose co_use predates last_at adds the column", () => {
+	const old = mkdtempSync(join(tmpdir(), "dmn-state-old-"));
+	try {
+		const legacy = new Database(join(old, "state.sqlite"), { create: true });
+		legacy.exec(
+			"CREATE TABLE co_use (a TEXT NOT NULL, b TEXT NOT NULL, weight REAL NOT NULL, PRIMARY KEY (a, b))",
+		);
+		legacy.close();
+		const upgraded = new LocalState({ directory: old, clock: () => at(7) });
+		try {
+			upgraded.recordCoUse(["a", "b"], "t");
+			expect(upgraded.associations("a")).toEqual([{ id: "b", weight: 1 }]);
+		} finally {
+			upgraded.close();
+		}
+		const reader = new Database(join(old, "state.sqlite"), { readonly: true });
+		try {
+			expect(
+				reader.query<{ last_at: string }, []>("SELECT last_at FROM co_use").get()?.last_at,
+			).toBe("2026-01-01T00:00:07.000Z");
+		} finally {
+			reader.close();
+		}
+	} finally {
+		rmSync(old, { recursive: true, force: true });
+	}
+});
+
+test("pair keys of ids containing ':' do not collide", () => {
+	now = at(0);
+	state.recordCoUse(["x", "y:z"], "colon-1");
+	state.recordCoUse(["x:y", "z"], "colon-1");
+	expect(state.associations("x")).toEqual([{ id: "y:z", weight: 1 }]);
+	expect(state.associations("x:y")).toEqual([{ id: "z", weight: 1 }]);
 });

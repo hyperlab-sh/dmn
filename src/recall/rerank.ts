@@ -21,7 +21,7 @@ export type RankedMemory = MemoryRecord & {
 };
 
 export interface RerankOptions {
-	/** Local use counts; only `uses` is read. */
+	/** Local use counts and co-use associations. */
 	state: Pick<LocalState, "uses" | "associations" | "associationFan">;
 	parameters?: Readonly<ActivationParameters>;
 	random?: () => number;
@@ -30,7 +30,7 @@ export interface RerankOptions {
 	promptThreshold?: number;
 }
 
-/** Orders candidates by A = B + S + ε, highest first; ties keep the input order. */
+/** Orders candidates by A = B + S + ε + association, highest first; ties keep the input order. */
 export function rerank(
 	candidates: ReadonlyArray<MemoryRecord>,
 	cue: Cue,
@@ -58,22 +58,26 @@ export function rerank(
 		return { ...memory, baseLevel, spreading, noise, activation: baseLevel + spreading + noise };
 	});
 	// One pass from the pre-association activations, after all noise is drawn.
-	const lenders = new Map<string, number>();
-	for (const memory of scored) {
-		if (memory.activation > promptThreshold) lenders.set(memory.id, memory.activation);
+	// Per lender: the total edge weight and the strength of its fan, one query each.
+	const lenders = new Map<string, { total: number; strength: number }>();
+	if (parameters.associationWeight !== 0) {
+		for (const memory of scored) {
+			if (memory.activation <= promptThreshold) continue;
+			const edges = state.associations(memory.id);
+			lenders.set(memory.id, {
+				total: edges.reduce((sum, edge) => sum + edge.weight, 0),
+				strength: Math.max(0, parameters.maximumAssociativeStrength - Math.log(1 + edges.length)),
+			});
+		}
 	}
 	return scored
 		.map((memory) => {
 			let association = 0;
 			if (parameters.associationWeight !== 0) {
 				for (const { id, weight } of state.associations(memory.id)) {
-					if (!lenders.has(id)) continue;
-					const total = state.associations(id).reduce((sum, edge) => sum + edge.weight, 0);
-					const strength = Math.max(
-						0,
-						parameters.maximumAssociativeStrength - Math.log(1 + state.associationFan(id)),
-					);
-					association += parameters.associationWeight * (weight / total) * strength;
+					const lender = lenders.get(id);
+					if (!lender) continue;
+					association += parameters.associationWeight * (weight / lender.total) * lender.strength;
 				}
 			}
 			return { ...memory, association, activation: memory.activation + association };
