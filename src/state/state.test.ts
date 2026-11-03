@@ -1,0 +1,60 @@
+import { afterAll, beforeAll, expect, test } from "bun:test";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { LocalState } from "./state.js";
+
+let directory: string;
+let state: LocalState;
+let tick = 0;
+
+beforeAll(() => {
+	directory = mkdtempSync(join(tmpdir(), "dmn-state-"));
+	state = new LocalState({
+		directory: join(directory, "nested"),
+		clock: () => new Date(Date.UTC(2026, 0, 1, 0, 0, tick++)),
+	});
+});
+
+afterAll(() => {
+	state.close();
+	rmSync(directory, { recursive: true, force: true });
+});
+
+test("creates state.sqlite under the given directory", () => {
+	expect(existsSync(join(directory, "nested", "state.sqlite"))).toBe(true);
+});
+
+test("uses of an unknown id are zero", () => {
+	expect(state.uses("unknown")).toEqual({ useCount: 0, firstSeenAt: null, lastUsedAt: null });
+});
+
+test("recordUse counts once per turn and tracks first and last use", () => {
+	state.recordUse("m1", "turn-1");
+	state.recordUse("m1", "turn-1");
+	expect(state.uses("m1").useCount).toBe(1);
+	state.recordUse("m1", "turn-2");
+	const uses = state.uses("m1");
+	expect(uses.useCount).toBe(2);
+	expect(uses.firstSeenAt).toMatch(/^2026-01-01T00:00:\d\d\.000Z$/);
+	expect(uses.lastUsedAt && uses.firstSeenAt && uses.lastUsedAt > uses.firstSeenAt).toBe(true);
+	state.recordUse("m2", "turn-1");
+	expect(state.uses("m2").useCount).toBe(1);
+});
+
+test("dormancy round trip: set, check, revive", () => {
+	expect(state.isDormant("m3")).toBe(false);
+	state.setDormant("m3");
+	state.setDormant("m3");
+	expect(state.isDormant("m3")).toBe(true);
+	state.revive("m3");
+	expect(state.isDormant("m3")).toBe(false);
+});
+
+test("tagFanCache returns fresh counts and null once stale", () => {
+	expect(state.tagFanCache.read("b", 1_000_000)).toBeNull();
+	state.tagFanCache.write("b", [{ tag: "t", count: 3 }]);
+	expect(state.tagFanCache.read("b", 1_000_000)).toEqual([{ tag: "t", count: 3 }]);
+	tick += 3600;
+	expect(state.tagFanCache.read("b", 1_000)).toBeNull();
+});

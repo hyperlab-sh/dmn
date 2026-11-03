@@ -9,3 +9,19 @@ export {
 } from "./activation/act-r.js";
 export type { Cue, CueInput } from "./cue/cue.js";
 export { buildCue, softTags } from "./cue/cue.js";
+export type { Config, LoadConfigOptions } from "./config/config.js";
+export { ConfigError, createStore, loadConfig, openState } from "./config/config.js";
+export type { LocalStateOptions, MemoryUses } from "./state/state.js";
+export { LocalState } from "./state/state.js";
+export type { HindsightOptions } from "./store/hindsight.js";
+export { bankFor, HindsightStore, StoreError } from "./store/hindsight.js";
+export type {
+	ListQuery,
+	MemoryRecord,
+	MemoryScore,
+	MemoryStore,
+	RecallQuery,
+	RetainItem,
+	TagCount,
+	TagsMatch,
+} from "./store/types.js";

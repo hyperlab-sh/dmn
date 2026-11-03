@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { ConfigError, loadConfig } from "../config/config.js";
+
 const usage = `dmn — Default Mode Network
 
 Usage:
@@ -20,6 +22,19 @@ switch (command) {
 	case "--help":
 	case "-h":
 		process.stdout.write(usage);
+		break;
+	case "hook":
+		try {
+			loadConfig({ env: process.env });
+		} catch (error) {
+			if (error instanceof ConfigError) {
+				process.stderr.write(`dmn: ${error.message}\n`);
+				process.exit(2);
+			}
+			throw error;
+		}
+		process.stderr.write("dmn: hook commands are not implemented yet\n");
+		process.exit(1);
 		break;
 	default:
 		process.stderr.write(`dmn: unknown command "${command}"\n\n${usage}`);

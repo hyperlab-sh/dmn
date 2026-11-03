@@ -18,7 +18,9 @@ export default defineConfig({
 	sourcemap: true,
 	clean: true,
 	target: "node20",
-	splitting: false,
+	// Chunks keep `bun:sqlite` out of commands that never open the state (`--version`).
+	splitting: true,
+	external: ["bun:sqlite"],
 	define: {
 		__DMN_VERSION__: JSON.stringify(packageJson.version),
 	},
