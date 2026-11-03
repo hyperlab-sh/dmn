@@ -11,7 +11,6 @@ import { printRest, runRestCommand } from "./rest.js";
 const root = new URL("../../..", import.meta.url).pathname;
 const bank = "org-acme";
 const quietBank = "org-quiet";
-const rosterBank = "org-roster";
 const now = new Date("2026-06-01T00:00:00Z");
 
 let server: ReturnType<typeof startFakeServer>;
@@ -56,12 +55,6 @@ beforeAll(async () => {
 		{ content: "a turn, not a learning", tags: ["project:a", "kind:turn"] },
 	]);
 	await store.retain(quietBank, [{ content: "a quiet turn", tags: ["project:a", "kind:turn"] }]);
-	await store.retain(rosterBank, [
-		{
-			content: "The reviewer cites the design doc. Flaky tests are tracked.",
-			tags: ["role:reviewer"],
-		},
-	]);
 	const all = await store.list(bank, { limit: 10, offset: 0 });
 	const idOf = (text: string) => all.find((memory) => memory.text === text)?.id as string;
 	projectLearning = idOf("learning from project a");
@@ -133,26 +126,18 @@ test("rest prints the report of every bank it was asked for; --apply prints what
 	expect(report.stdout).not.toContain("promoted ");
 	expect(report.stdout).toContain(`no memory tagged kind:learning in ${quietBank}\n`);
 	expect(report.stdout).toContain("skipped org-never: not found\n");
-
-	const applied = await dmn("--apply", "--bank", bank);
-	expect(applied).toMatchObject({ exitCode: 0, stderr: "" });
-	expect(applied.stdout).toContain(`promoted ${projectLearning}\n`);
-	expect(applied.stdout).toContain(`promoted ${orgLearning}\n`);
-});
-
-test("rest creates and refreshes the four role models in each bank it consolidates", async () => {
-	const report = await dmn("--bank", rosterBank);
-	expect(report).toMatchObject({ exitCode: 0, stderr: "" });
-	const models = await store.mentalModels(rosterBank);
-	expect(models.map((model) => model.id).sort()).toEqual([
+	// The same run wired the roster step: four role models in every bank rest consolidated,
+	// none in a bank it skipped before step 3.
+	expect((await store.mentalModels(bank)).map((model) => model.id).sort()).toEqual([
 		"dmn-role-architect",
 		"dmn-role-developer",
 		"dmn-role-operator",
 		"dmn-role-reviewer",
 	]);
-	// The fake built the reviewer model's content on refresh; the roster line takes its first
-	// sentence, so the whole sentence must be there.
-	expect(models.find((model) => model.role === "reviewer")?.content).toBe(
-		"The reviewer cites the design doc. Flaky tests are tracked.",
-	);
+	expect(await store.mentalModels("org-never")).toEqual([]);
+
+	const applied = await dmn("--apply", "--bank", bank);
+	expect(applied).toMatchObject({ exitCode: 0, stderr: "" });
+	expect(applied.stdout).toContain(`promoted ${projectLearning}\n`);
+	expect(applied.stdout).toContain(`promoted ${orgLearning}\n`);
 });

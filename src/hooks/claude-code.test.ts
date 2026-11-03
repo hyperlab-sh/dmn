@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../config/config.js";
@@ -9,6 +9,7 @@ import { estimateTokens } from "../recall/inject.js";
 import { rosterModelId, rosterRoles, rosterSourceQuery } from "../roster/roster.js";
 import { LocalState } from "../state/state.js";
 import { FakeStore } from "../store/fake.js";
+import { bankFor } from "../store/hindsight.js";
 import type { RecallQuery, RetainItem } from "../store/types.js";
 import { type HookDeps, HookEventError, handleHookEvent, parseHookEvent } from "./claude-code.js";
 
@@ -41,36 +42,15 @@ class DownRosterStore extends FakeStore {
 	}
 }
 
-/**
- * A store holding one memory per of two roles and all four role models: the fixture the
- * session-start roster tests reuse.
- */
-async function rosteredStore(): Promise<FakeStore> {
-	const roster = new FakeStore(() => new Date("2026-01-01T00:00:00Z"));
-	await roster.retain("generic", [
-		{ content: "the developer keeps the build green", tags: ["role:developer"] },
-		{
-			content: "The reviewer cites the design doc. Flaky tests are tracked.",
-			tags: ["role:reviewer"],
-		},
-	]);
-	for (const role of rosterRoles) {
-		await roster.createMentalModel("generic", {
-			id: rosterModelId(role),
-			name: rosterModelId(role),
-			sourceQuery: rosterSourceQuery(role),
-			tags: [`role:${role}`],
-			maxTokens: 512,
-		});
-	}
-	return roster;
-}
-
 let directory: string;
 let state: LocalState;
 let store: FakeStore;
 let deps: HookDeps;
 let cwd: string;
+/** The roster fixture: one memory per of two roles and all four models, built once. */
+let rosterStore: FakeStore;
+/** A transcript whose Edit makes the cue's role developer: its own model is the one not shown. */
+let developerTranscript: string;
 
 const event = (fields: object) =>
 	parseHookEvent(JSON.stringify({ session_id: "s", cwd, ...fields }));
@@ -86,6 +66,36 @@ beforeAll(async () => {
 	});
 	deps = { store, state, config, random: () => 0.5, now: new Date("2026-01-01T00:00:00Z") };
 	await store.retain("generic", [{ content: "retry with jitter", tags: [] }]);
+	// The session-start roster rows share this fixture and the developer transcript.
+	rosterStore = new FakeStore(() => new Date("2026-01-01T00:00:00Z"));
+	await rosterStore.retain("generic", [
+		{ content: "the developer keeps the build green", tags: ["role:developer"] },
+		{
+			content: "The reviewer cites the design doc. Flaky tests are tracked.",
+			tags: ["role:reviewer"],
+		},
+	]);
+	for (const role of rosterRoles) {
+		await rosterStore.createMentalModel("generic", {
+			id: rosterModelId(role),
+			name: rosterModelId(role),
+			sourceQuery: rosterSourceQuery(role),
+			tags: [`role:${role}`],
+			maxTokens: 512,
+		});
+	}
+	developerTranscript = join(directory, "developer.jsonl");
+	writeFileSync(
+		developerTranscript,
+		JSON.stringify({
+			type: "assistant",
+			uuid: "a-developer",
+			message: {
+				role: "assistant",
+				content: [{ type: "tool_use", name: "Edit", input: { file_path: "a" } }],
+			},
+		}),
+	);
 });
 
 afterAll(() => {
@@ -434,27 +444,13 @@ test("stop tags the retained turns with the judge's kinds at the configured bar;
 });
 
 test("session start appends one roster line per other role after the memory lines; a prompt event none", async () => {
-	const roster = await rosteredStore();
-	// The transcript's Edit makes the cue's role developer: its own model is the one not shown.
-	const developerTranscript = join(directory, "developer.jsonl");
-	writeFileSync(
-		developerTranscript,
-		JSON.stringify({
-			type: "assistant",
-			uuid: "a-developer",
-			message: {
-				role: "assistant",
-				content: [{ type: "tool_use", name: "Edit", input: { file_path: "a" } }],
-			},
-		}),
-	);
 	const start = await handleHookEvent(
 		event({
 			hook_event_name: "SessionStart",
 			source: "startup",
 			transcript_path: developerTranscript,
 		}),
-		{ ...deps, store: roster },
+		{ ...deps, store: rosterStore },
 	);
 	const context = start?.hookSpecificOutput.additionalContext ?? "";
 	const lines = context.split("\n");
@@ -473,39 +469,52 @@ test("session start appends one roster line per other role after the memory line
 			prompt: "build",
 			transcript_path: developerTranscript,
 		}),
-		{ ...deps, store: roster },
+		{ ...deps, store: rosterStore },
 	);
 	expect(prompt?.hookSpecificOutput.additionalContext ?? "").not.toContain("[roster:");
 });
 
-test("a roster line that cannot fit the budget left by the memory lines is dropped", async () => {
-	const roster = new FakeStore(() => new Date("2026-01-01T00:00:00Z"));
-	await roster.retain("generic", [
-		// The developer memory is the only recall candidate; the reviewer one feeds its model.
-		{ content: "x".repeat(20), tags: ["role:developer"] },
-		{ content: "The reviewer cites the design doc.", tags: ["role:reviewer"] },
+test("an empty model in the organization bank does not shadow the generic bank's model", async () => {
+	// The organization bank holds all four models with nothing behind them; generic holds the
+	// reviewer's memory, so only its model can say anything.
+	const twoBanks = new FakeStore(() => new Date("2026-01-01T00:00:00Z"));
+	await twoBanks.retain(bankFor(undefined), [
+		{ content: "The reviewer writes the summary.", tags: ["role:reviewer"] },
 	]);
-	await roster.createMentalModel("generic", {
-		id: "dmn-role-reviewer",
-		name: "dmn-role-reviewer",
-		sourceQuery: rosterSourceQuery("reviewer"),
-		tags: ["role:reviewer"],
-		maxTokens: 512,
-	});
-	const developerTranscript = join(directory, "developer.jsonl");
-	writeFileSync(
-		developerTranscript,
-		JSON.stringify({
-			type: "assistant",
-			uuid: "a-developer",
-			message: {
-				role: "assistant",
-				content: [{ type: "tool_use", name: "Edit", input: { file_path: "a" } }],
-			},
+	for (const visited of [bankFor("acme"), bankFor(undefined)]) {
+		for (const role of rosterRoles) {
+			await twoBanks.createMentalModel(visited, {
+				id: rosterModelId(role),
+				name: rosterModelId(role),
+				sourceQuery: rosterSourceQuery(role),
+				tags: [`role:${role}`],
+				maxTokens: 512,
+			});
+		}
+	}
+	// A space under a mapped directory gives the cue an organization, so the hook reads two banks.
+	const rosterSpace = join(directory, "acmeorg", "space");
+	mkdirSync(rosterSpace, { recursive: true });
+	writeFileSync(join(rosterSpace, "HYPER.md"), "");
+	const output = await handleHookEvent(
+		event({
+			hook_event_name: "SessionStart",
+			source: "startup",
+			cwd: rosterSpace,
+			transcript_path: developerTranscript,
 		}),
+		{ ...deps, store: twoBanks, config: { ...deps.config, organizations: { acmeorg: "acme" } } },
 	);
-	// Budget 20: the memory line spends 16 tokens, leaving 4 — the 13-token roster line is dropped.
-	const tight = { ...deps, store: roster, config: { ...deps.config, budgetTokens: 20 } };
+	const lines = (output?.hookSpecificOutput.additionalContext ?? "").split("\n");
+	expect(lines.filter((line) => line.startsWith("[roster:"))).toEqual([
+		"[roster:reviewer] The reviewer writes the summary.",
+	]);
+});
+
+test("a roster line that cannot fit the budget left by the memory lines is dropped", async () => {
+	// Budget 20: the developer memory's line spends 19 tokens of it, and the newline joining a
+	// roster line would spend the last one — the 13-token roster line cannot fit.
+	const tight = { ...deps, store: rosterStore, config: { ...deps.config, budgetTokens: 20 } };
 	const output = await handleHookEvent(
 		event({
 			hook_event_name: "SessionStart",
@@ -515,7 +524,7 @@ test("a roster line that cannot fit the budget left by the memory lines is dropp
 		tight,
 	);
 	const context = output?.hookSpecificOutput.additionalContext ?? "";
-	expect(context).toMatch(/^\[m:[^\]]+\] x{20}$/);
+	expect(context).toMatch(/^\[m:[^\]]+\] the developer keeps the build green$/);
 	expect(context).not.toContain("[roster:");
 	expect(estimateTokens(context)).toBeLessThanOrEqual(20);
 });

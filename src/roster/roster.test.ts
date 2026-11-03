@@ -1,17 +1,14 @@
 import { beforeAll, expect, test } from "bun:test";
 import { estimateTokens } from "../recall/inject.js";
 import { FakeStore } from "../store/fake.js";
-import type { MentalModel, MentalModelInput } from "../store/types.js";
-import {
-	firstSentence,
-	rosterLines,
-	rosterRoles,
-	rosterSourceQuery,
-	syncRoster,
-} from "./roster.js";
+import type { MemoryStore, MentalModel, MentalModelInput } from "../store/types.js";
+import { rosterLines, rosterRoles, syncRoster } from "./roster.js";
 
 const now = new Date("2026-06-01T00:00:00Z");
 const bank = "org-acme";
+// The failure rows work on their own banks of the shared store, so no row reads another's writes.
+const refusedCreateBank = "org-refused-create";
+const refusedRefreshBank = "org-refused-refresh";
 
 /** Records every roster write, so the create/refresh counts and shapes are observable. */
 class RosterSpy extends FakeStore {
@@ -27,31 +24,37 @@ class RosterSpy extends FakeStore {
 	}
 }
 
-/** Refuses the create of one role's model; the rest of the roster pass goes on. */
-class RefusingCreateStore extends RosterSpy {
-	constructor(
-		private readonly refusedRole: string,
-		clock: () => Date,
-	) {
-		super(clock);
-	}
-	override async createMentalModel(bank: string, model: MentalModelInput): Promise<void> {
-		if (model.tags.includes(`role:${this.refusedRole}`)) throw new Error("model refused");
-		await super.createMentalModel(bank, model);
-	}
-}
-
-/** Fails every refresh; the creates still happen. */
-class FailingRefreshStore extends RosterSpy {
-	override async refreshMentalModel(bank: string, id: string): Promise<void> {
-		this.refreshed.push({ bank, id });
-		throw new Error("refresh refused");
-	}
+/**
+ * Wraps the file's shared store, refusing the roster writes one row wants to see fail; every
+ * other call delegates, so the row syncs against the same fixture the other rows assert on.
+ */
+function refusingRosterStore(
+	refuse: (kind: "create" | "refresh", bank: string, id: string) => boolean,
+): MemoryStore {
+	return new Proxy<MemoryStore>(store, {
+		get(target, property) {
+			if (property === "createMentalModel" || property === "refreshMentalModel") {
+				return (visited: string, ...rest: unknown[]) => {
+					const kind = property === "createMentalModel" ? "create" : "refresh";
+					const id =
+						property === "createMentalModel" ? (rest[0] as MentalModelInput).id : String(rest[0]);
+					if (refuse(kind, visited, id)) throw new Error(`${property} refused`);
+					return (target[property] as (...args: unknown[]) => unknown)(visited, ...rest);
+				};
+			}
+			const value = Reflect.get(target, property, target);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	});
 }
 
 let store: RosterSpy;
+/** The fixture's first sync, kept as it happened; later rows append to the live arrays. */
+let firstCreated: { bank: string; model: MentalModelInput }[];
+let firstRefreshed: { bank: string; id: string }[];
 
-// The fixture is built once; the second-run test builds on the first run's models.
+// Built once: the two-role bank, then the first roster sync whose records the first two rows
+// assert. No row depends on another row having run.
 beforeAll(async () => {
 	store = new RosterSpy(() => now);
 	await store.retain(bank, [
@@ -62,32 +65,35 @@ beforeAll(async () => {
 		{ content: "The developer keeps the build green.", tags: ["role:developer"] },
 		{ content: "an operator runbook line one\nand a second line", tags: ["role:operator"] },
 	]);
-});
-
-test("syncRoster creates the four role models with the pinned shape and refreshes every one", async () => {
 	const warnings: string[] = [];
 	await syncRoster(store, bank, rosterRoles, { onWarning: (message) => warnings.push(message) });
 	expect(warnings).toEqual([]);
-	expect(store.created.map((entry) => entry.model.id)).toEqual([
+	firstCreated = store.created.map((entry) => ({ bank: entry.bank, model: { ...entry.model } }));
+	firstRefreshed = store.refreshed.map((entry) => ({ ...entry }));
+});
+
+test("the first sync creates the four role models with the pinned shape and refreshes every one", async () => {
+	expect(firstCreated.map((entry) => entry.model.id)).toEqual([
 		"dmn-role-architect",
 		"dmn-role-developer",
 		"dmn-role-reviewer",
 		"dmn-role-operator",
 	]);
-	// The pinned shape, asserted whole for one role (D31).
-	expect(store.created.filter((entry) => entry.model.id === "dmn-role-reviewer")).toEqual([
+	// The pinned shape whole, expected with the literal D31 source query.
+	expect(firstCreated.filter((entry) => entry.model.id === "dmn-role-reviewer")).toEqual([
 		{
 			bank,
 			model: {
 				id: "dmn-role-reviewer",
 				name: "dmn-role-reviewer",
-				sourceQuery: rosterSourceQuery("reviewer"),
+				sourceQuery:
+					"What the reviewer role's memories cover: the facts, decisions and habits this role relies on",
 				tags: ["role:reviewer"],
 				maxTokens: 512,
 			},
 		},
 	]);
-	expect(store.refreshed.map((entry) => entry.id)).toEqual([
+	expect(firstRefreshed.map((entry) => entry.id)).toEqual([
 		"dmn-role-architect",
 		"dmn-role-developer",
 		"dmn-role-reviewer",
@@ -109,23 +115,28 @@ test("syncRoster creates the four role models with the pinned shape and refreshe
 });
 
 test("a second sync creates none and refreshes the four", async () => {
-	store.created.length = 0;
-	store.refreshed.length = 0;
+	// Deltas against the live log, so the row stands on its own whatever ran before it.
+	const createdBefore = store.created.length;
+	const refreshedBefore = store.refreshed.length;
 	await syncRoster(store, bank, rosterRoles);
-	expect(store.created).toEqual([]);
-	expect(store.refreshed.map((entry) => entry.id)).toHaveLength(4);
+	expect(store.created.length).toBe(createdBefore);
+	expect(store.refreshed.slice(refreshedBefore).map((entry) => entry.id)).toHaveLength(4);
 });
 
 test("a create the store refuses is one warning and the sync continues with the other roles", async () => {
-	const refusing = new RefusingCreateStore("reviewer", () => now);
-	await refusing.retain(bank, [
-		{ content: "The reviewer cites the design doc.", tags: ["role:reviewer"] },
-	]);
 	const warnings: string[] = [];
-	await syncRoster(refusing, bank, rosterRoles, { onWarning: (message) => warnings.push(message) });
+	await syncRoster(
+		refusingRosterStore(
+			(kind, visited, id) =>
+				kind === "create" && visited === refusedCreateBank && id === "dmn-role-reviewer",
+		),
+		refusedCreateBank,
+		rosterRoles,
+		{ onWarning: (message) => warnings.push(message) },
+	);
 	expect(warnings).toEqual([expect.stringContaining("reviewer")]);
 	// The other three were created; nothing threw.
-	expect((await refusing.mentalModels(bank)).map((model) => model.role).sort()).toEqual([
+	expect((await store.mentalModels(refusedCreateBank)).map((model) => model.role).sort()).toEqual([
 		"architect",
 		"developer",
 		"operator",
@@ -133,54 +144,59 @@ test("a create the store refuses is one warning and the sync continues with the 
 });
 
 test("a refresh the store refuses is one warning per model and the sync still finishes", async () => {
-	const failing = new FailingRefreshStore(() => now);
 	const warnings: string[] = [];
-	await syncRoster(failing, bank, rosterRoles, { onWarning: (message) => warnings.push(message) });
+	await syncRoster(
+		refusingRosterStore((kind, visited) => kind === "refresh" && visited === refusedRefreshBank),
+		refusedRefreshBank,
+		rosterRoles,
+		{ onWarning: (message) => warnings.push(message) },
+	);
 	expect(warnings).toHaveLength(4);
 	// The creates were not rolled back by the failed refreshes.
-	expect(await failing.mentalModels(bank)).toHaveLength(4);
+	expect(await store.mentalModels(refusedRefreshBank)).toHaveLength(4);
 });
 
-const model = (role: string, content: string): MentalModel => ({
-	id: `dmn-role-${role}`,
-	role,
+const reviewerModel = (content: string): MentalModel => ({
+	id: "dmn-role-reviewer",
+	role: "reviewer",
 	content,
 	refreshedAt: "2026-01-01T00:00:00Z",
 });
 
-test("the first sentence runs to a period followed by a space, else the first 200 characters", () => {
-	expect(firstSentence("One. Two. Three.")).toBe("One.");
-	expect(firstSentence("A question? Yes.")).toBe("A question?");
-	expect(firstSentence("No end here")).toBe("No end here");
-	expect(firstSentence("x".repeat(250))).toBe("x".repeat(200));
-	expect(firstSentence("  \n spaced\tout.  ")).toBe("spaced out.");
+test("a roster line carries the model's first sentence, flattened, capped at 200 characters", () => {
+	for (const [content, sentence] of [
+		[
+			"The reviewer cites the design doc. Flaky tests are tracked.",
+			"The reviewer cites the design doc.",
+		],
+		["A question? Yes.", "A question?"],
+		["No end here", "No end here"],
+		["x".repeat(250), "x".repeat(200)],
+		["  \n spaced\tout.  ", "spaced out."],
+	] as const) {
+		expect(rosterLines([reviewerModel(content)], "developer", 600)).toEqual([
+			`[roster:reviewer] ${sentence}`,
+		]);
+	}
 });
 
-test("rosterLines takes each model's first sentence, skipping the own role and empty content", () => {
-	const lines = rosterLines(
-		[
-			model("developer", "The developer keeps the build green.\nAlso runs migrations."),
-			model("reviewer", "The reviewer cites the design doc. Flaky tests are tracked."),
-			model("architect", ""),
-			model("operator", "an operator runbook with no sentence end at all"),
-		],
-		"developer",
-		600,
-	);
-	expect(lines).toEqual([
-		"[roster:reviewer] The reviewer cites the design doc.",
-		"[roster:operator] an operator runbook with no sentence end at all",
-	]);
+test("rosterLines skips the own role and a model with nothing to say", () => {
+	expect(
+		rosterLines([reviewerModel("The reviewer cites the design doc.")], "reviewer", 600),
+	).toEqual([]);
+	expect(rosterLines([reviewerModel("")], "developer", 600)).toEqual([]);
+	expect(rosterLines([reviewerModel("   \n ")], "developer", 600)).toEqual([]);
 });
 
 test("a roster line that does not fit the remaining budget is dropped, a later shorter one kept", () => {
 	const long = "r".repeat(200);
 	const short = "s".repeat(20);
-	const lines = rosterLines(
-		[model("reviewer", long), model("operator", long), model("architect", short)],
-		"developer",
-		100,
-	);
+	const models = [
+		{ id: "a", role: "reviewer", content: long, refreshedAt: "2026-01-01T00:00:00Z" },
+		{ id: "b", role: "operator", content: long, refreshedAt: "2026-01-01T00:00:00Z" },
+		{ id: "c", role: "architect", content: short, refreshedAt: "2026-01-01T00:00:00Z" },
+	];
+	const lines = rosterLines(models, "developer", 100);
 	expect(lines).toHaveLength(2);
 	expect(lines[0]?.startsWith("[roster:reviewer]")).toBe(true);
 	expect(lines[1]?.startsWith("[roster:architect]")).toBe(true);

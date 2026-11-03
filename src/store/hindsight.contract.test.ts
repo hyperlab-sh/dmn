@@ -88,5 +88,11 @@ describe.skipIf(!storeUrl)("Hindsight contract (needs DMN_STORE_URL)", () => {
 			maxTokens: 512,
 		});
 		await store.refreshMentalModel(bank, "dmn-role-reviewer");
+		// The store answers the refresh: the model it lists back carries a fresh stamp.
+		const refreshed = (await store.mentalModels(bank)).find(
+			(model) => model.id === "dmn-role-reviewer",
+		);
+		expect(refreshed?.refreshedAt).toBeString();
+		expect(refreshed?.refreshedAt.length ?? 0).toBeGreaterThan(0);
 	}, 120_000);
 });
