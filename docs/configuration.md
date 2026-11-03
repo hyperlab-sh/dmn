@@ -6,12 +6,13 @@ with status 2 and names it.
 
 ## Environment
 
-| Variable          | Required | Meaning                                                                                                                   |
-| ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `DMN_STORE_URL`   | yes      | Base URL of the memory store (a Hindsight server), or `fake:` for a throwaway in-memory store used by tests and dry runs. |
-| `XDG_CONFIG_HOME` | no       | Holds `dmn/config.json`. Falls back to `~/.config`.                                                                       |
-| `XDG_STATE_HOME`  | no       | Holds `dmn/state.sqlite` (use counts, dormancy). Falls back to `~/.local/state`.                                          |
-| `XDG_DATA_HOME`   | no       | Holds `dmn/replay/`. Falls back to `~/.local/share`.                                                                      |
+| Variable          | Required                      | Meaning                                                                                                                     |
+| ----------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `DMN_STORE_URL`   | yes                           | Base URL of the memory store (a Hindsight server), or `fake:` for a throwaway in-memory store used by tests and dry runs.   |
+| `LAYA_API_KEY`    | with `judge.provider: "laya"` | API key of the Laya judge (`dmn replay judge`). Environment only: never put it in `config.json`. No default; unset exits 2. |
+| `XDG_CONFIG_HOME` | no                            | Holds `dmn/config.json`. Falls back to `~/.config`.                                                                         |
+| `XDG_STATE_HOME`  | no                            | Holds `dmn/state.sqlite` (use counts, dormancy). Falls back to `~/.local/state`.                                            |
+| `XDG_DATA_HOME`   | no                            | Holds `dmn/replay/`. Falls back to `~/.local/share`.                                                                        |
 
 ## `config.json`
 
@@ -33,6 +34,31 @@ Located at `$XDG_CONFIG_HOME/dmn/config.json`. Every key is optional.
 | `fanCacheSeconds`    | `300`                                          | How long tag counts are cached.                                                                |
 | `replayDir`          | `$XDG_DATA_HOME/dmn/replay`                    | Where replay runs are written.                                                                 |
 | `activation`         | ACT-R defaults                                 | Overrides for the activation parameters, including `associationWeight` (default `0.5`).        |
+| `judge`              | `{provider: "none", …}`                        | The usefulness judge (below).                                                                  |
+
+### Judge
+
+```json
+{
+	"judge": {
+		"provider": "laya",
+		"threshold": 0.5,
+		"intrusionThreshold": 0.7,
+		"baseUrl": "https://api.laya.studio",
+		"timeoutMs": 5000
+	}
+}
+```
+
+| Key                  | Default                   | Meaning                                                                    |
+| -------------------- | ------------------------- | -------------------------------------------------------------------------- |
+| `provider`           | `none`                    | `none` or `laya`. With `laya`, `LAYA_API_KEY` must be set.                 |
+| `threshold`          | `0.5`                     | `replay judge` marks a memory useful at P(useful) of at least this (0..1). |
+| `intrusionThreshold` | `0.7`                     | Bar for the intrusive path once the judge gates it (0..1). Not read yet.   |
+| `baseUrl`            | `https://api.laya.studio` | Another server speaking the same API (for example a local model).          |
+| `timeoutMs`          | `5000`                    | Per-call limit.                                                            |
+
+See [Judge with Laya](replay.md#judge-with-laya).
 
 ### Organizations
 

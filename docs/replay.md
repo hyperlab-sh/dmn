@@ -19,7 +19,8 @@ dmn replay ~/.claude/projects/<project>/<session>.jsonl [more.jsonl ...] [--top 
 | `--out <dir>`         | Where run directories go. Default: the `replayDir` config key.                                                                                                                           |
 | `--top <n>`           | List length and the `n` of precision@n. Default 5.                                                                                                                                       |
 
-Each run writes `<out>/run-<timestamp>/report.md` and `judgements.json`. A run directory that
+Each run writes `<out>/run-<timestamp>/report.md`, `judgements.json`, and the texts `replay judge`
+needs: `memories.json` (`{id: text}` of every shown memory) and `prompts.json` (`{number: prompt}`). A run directory that
 already exists is never overwritten (exit 2, checked before the replay starts): your judgements
 are in it, so with a fixed `DMN_NOW` pass another `--out` or remove the directory. The report
 records the run's `top:`, and `replay score` uses it. The harness only reads the store; the one
@@ -29,7 +30,7 @@ afterwards.
 For reproducible output set `DMN_SEED` (any string, seeds the activation noise) and `DMN_NOW`
 (an ISO date, the clock). Two runs with the same inputs are byte-identical.
 
-## Judge
+## Judge by hand
 
 `report.md` shows, per prompt, the cue `(organization, project, stack, role, task)`, the first
 120 characters of the prompt, and two top-5 lists: `store` (the store's own order) and
@@ -38,6 +39,41 @@ For reproducible output set `DMN_SEED` (any string, seeds the activation noise) 
 `judgements.json` has one entry per shown memory: `{prompt, id, order, useful: null}`. Open the
 report next to it and set `useful` to `true` when the memory would have helped with that prompt,
 `false` when not. Judge each memory on its own text; the same memory appears once per order.
+
+## Judge with Laya
+
+`dmn replay judge <run-dir> [--threshold <p>] [--judge fake|laya]` fills `judgements.json` without
+a human. For every shown memory it asks a judge whether the memory would have helped with its
+prompt, stores the calibrated probability as `judge: {useful, level}` (P(true) in 0..1 and an
+expected level 0..3: useless, background, helpful, decisive), and sets `useful` to
+`probability >= threshold`. A memory shown in both orders of a prompt is judged once. Entries
+the judge did not answer stay `null`. `report.md` gains `P(useful)=0.xx` after each id, and
+`dmn replay score` then runs unchanged. The command prints `judged N/M`.
+
+```bash
+export LAYA_API_KEY=...                  # environment only; never written to config or the run
+dmn replay judge <run-dir> --judge laya  # or set "judge": {"provider": "laya"} in config.json
+dmn replay judge <run-dir> --judge fake  # keyword overlap, offline, for dry runs
+```
+
+- **What is sent.** To `https://api.laya.studio/v1/systemone/batch` (`judge.baseUrl` overrides):
+  the prompt text and the memory text (cut to 1,500 characters), and two questions. No ids, tags,
+  working directories or organization names. The service's documentation states inputs are not
+  stored; check it before pointing this at private prompts.
+- **Cost.** Billed per input token (`usage.input_tokens` in the response); each memory is one
+  batch item carrying the prompt and the memory, so a run costs about
+  `shown memories x (prompt + memory tokens)`. Requests are batched 64 at a time; 429 and 503 are
+  retried up to five attempts, waiting for `Retry-After`.
+- **Threshold.** The default `0.5` is only a start: the service's checkpoints need per-task
+  calibration. Probes separate unrelated memories from useful ones cleanly and useful from
+  same-project background only partly. Because the raw probability is stored beside `useful`,
+  recalibrate without new calls: pass `--threshold` to re-run `judge` (it overwrites `useful`
+  only), or read `judge.useful` from `judgements.json` and pick the cut that matches your own
+  labels on a handful of entries.
+- **Older runs.** A run made before this command has no `memories.json`; `judge` exits 2 naming
+  the file. Make a new run.
+- **Local model later.** The model behind the service is open weights (ModernBERT-large,
+  Apache-2.0); `judge.baseUrl` lets a local server answer the same API.
 
 ## Score
 

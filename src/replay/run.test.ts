@@ -79,6 +79,12 @@ test("report lists the cue, the excerpt and both top-5 lists; judgements are one
 	);
 	expect(judgements).toHaveLength(shown);
 	expect(judgements.every((judgement) => judgement.useful === null)).toBe(true);
+	const memories = JSON.parse(readFileSync(join(directory, "memories.json"), "utf8"));
+	const shownMemories = result.entries.flatMap((e) => [...e.store, ...e.activation]);
+	expect(Object.keys(memories).sort()).toEqual([...new Set(shownMemories.map((m) => m.id))].sort());
+	expect(memories[shownMemories[0]?.id as string]).toBe(shownMemories[0]?.text);
+	const promptTexts = JSON.parse(readFileSync(join(directory, "prompts.json"), "utf8"));
+	expect(promptTexts["1"]).toBe(prompts[0]?.text);
 	const first = result.entries[1];
 	expect(judgements).toContainEqual({
 		prompt: 2,

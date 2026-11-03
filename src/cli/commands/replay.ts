@@ -1,8 +1,11 @@
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ConfigError, createStore, loadConfig } from "../../config/config.js";
+import { ConfigError, createJudge, createStore, loadConfig } from "../../config/config.js";
 import type { Manifest } from "../../cue/stack.js";
+import { FakeJudge } from "../../judge/fake.js";
+import type { Judge } from "../../judge/types.js";
+import { judgeRun, MissingRunFileError } from "../../replay/judge.js";
 import { readManifests } from "../../replay/manifests.js";
 import { RunExistsError, readRunTop, writeReport } from "../../replay/report.js";
 import { readSeedMemories, runName, runReplay, seedFakeStore } from "../../replay/run.js";
@@ -15,6 +18,7 @@ const usage = `Usage:
   dmn replay <transcript.jsonl>... [--store fake|<url>] [--out <dir>] [--top 5]
              [--memories <json>] [--manifests <dir>]
   dmn replay score <run-dir> [--top 5]
+  dmn replay judge <run-dir> [--threshold <p>] [--judge fake|laya]
 `;
 
 class UsageError extends Error {}
@@ -26,6 +30,8 @@ interface Options {
 	top?: number;
 	memories?: string;
 	manifests?: string;
+	threshold?: number;
+	judge?: "fake" | "laya";
 }
 
 function parseArguments(argv: string[]): Options {
@@ -50,6 +56,18 @@ function parseArguments(argv: string[]): Options {
 				break;
 			case "--manifests":
 				options.manifests = value;
+				break;
+			case "--threshold": {
+				const threshold = Number(value);
+				if (!(threshold >= 0 && threshold <= 1))
+					throw new UsageError("--threshold must be a number from 0 to 1");
+				options.threshold = threshold;
+				break;
+			}
+			case "--judge":
+				if (value !== "fake" && value !== "laya")
+					throw new UsageError("--judge must be fake or laya");
+				options.judge = value;
 				break;
 			case "--top": {
 				const top = Number(value);
@@ -91,6 +109,33 @@ function scoreCommand(argv: string[]): number {
 	console.log(`store p@${top} = ${result.store.toFixed(2)}`);
 	console.log(`activation p@${top} = ${result.activation.toFixed(2)}`);
 	console.log(`judged ${result.judged}/${judgements.length}`);
+	return 0;
+}
+
+async function judgeCommand(argv: string[]): Promise<number> {
+	const options = parseArguments(argv);
+	const [directory] = options.files;
+	if (!directory || options.files.length > 1) {
+		throw new UsageError("judge takes exactly one run directory");
+	}
+	// The judge never touches the store, so a missing DMN_STORE_URL must not stop it.
+	const env = { ...process.env, DMN_STORE_URL: process.env.DMN_STORE_URL ?? "fake:" };
+	const config = loadConfig({ env });
+	let judge: Judge | undefined;
+	if (options.judge === "fake") {
+		judge = new FakeJudge();
+	} else {
+		const provider = options.judge ?? config.judge.provider;
+		judge = createJudge({ ...config, judge: { ...config.judge, provider } }, env);
+		if (!judge) {
+			throw new UsageError(
+				'no judge is configured; pass --judge fake|laya or set "judge": {"provider": "laya"} in config.json',
+			);
+		}
+	}
+	const threshold = options.threshold ?? config.judge.threshold;
+	const { judged, total } = await judgeRun(directory, judge, threshold);
+	console.log(`judged ${judged}/${total}`);
 	return 0;
 }
 
@@ -149,12 +194,15 @@ async function replayCommand(argv: string[]): Promise<number> {
 /** `dmn replay …`; returns the exit code. */
 export async function run(argv: string[]): Promise<number> {
 	try {
-		return argv[0] === "score" ? scoreCommand(argv.slice(1)) : await replayCommand(argv);
+		if (argv[0] === "score") return scoreCommand(argv.slice(1));
+		if (argv[0] === "judge") return await judgeCommand(argv.slice(1));
+		return await replayCommand(argv);
 	} catch (error) {
 		if (
 			error instanceof UsageError ||
 			error instanceof ConfigError ||
-			error instanceof RunExistsError
+			error instanceof RunExistsError ||
+			error instanceof MissingRunFileError
 		) {
 			process.stderr.write(`dmn: ${error.message}\n\n${usage}`);
 			return 2;

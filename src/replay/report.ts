@@ -8,6 +8,8 @@ export interface Judgement {
 	id: string;
 	order: "store" | "activation";
 	useful: boolean | null;
+	/** Set by `replay judge`: the calibrated probability behind `useful`, and the expected level. */
+	judge?: { useful: number; level: number };
 }
 
 export interface Scores {
@@ -59,12 +61,16 @@ export function renderSummary(scores?: Scores): string {
 	].join("\n");
 }
 
-/** Writes `report.md` and the judgements skeleton (`useful: null`) into `directory`. */
+/** Writes `report.md`, the judgements skeleton (`useful: null`) and the texts `replay judge` needs. */
 export function writeReport(result: ReplayResult, directory: string): void {
 	if (existsSync(directory)) throw new RunExistsError(directory);
 	const lines = [`# dmn replay ${result.run}`, "", `top: ${result.top}`, ""];
 	const judgements: Judgement[] = [];
+	const memories: Record<string, string> = {};
+	const prompts: Record<string, string> = {};
 	for (const entry of result.entries) {
+		prompts[entry.number] = entry.prompt.text;
+		for (const memory of [...entry.store, ...entry.activation]) memories[memory.id] = memory.text;
 		lines.push(
 			`### Prompt ${entry.number}${entry.prompt.at ? ` (${entry.prompt.at})` : ""}`,
 			"",
@@ -92,4 +98,6 @@ export function writeReport(result: ReplayResult, directory: string): void {
 	mkdirSync(directory, { recursive: true });
 	writeFileSync(join(directory, "report.md"), lines.join("\n"));
 	writeFileSync(join(directory, "judgements.json"), `${JSON.stringify(judgements, null, 2)}\n`);
+	writeFileSync(join(directory, "memories.json"), `${JSON.stringify(memories, null, 2)}\n`);
+	writeFileSync(join(directory, "prompts.json"), `${JSON.stringify(prompts, null, 2)}\n`);
 }
