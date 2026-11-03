@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../config/config.js";
 import type { Cue } from "../cue/cue.js";
+import { FakeJudge } from "../judge/fake.js";
 import { LocalState } from "../state/state.js";
 import { FakeStore } from "../store/fake.js";
 import type { MemoryRecord, RecallQuery } from "../store/types.js";
@@ -93,4 +94,74 @@ test("a dormant memory never appears, even as the top store result", async () =>
 	const result = await texts("acme", "memory dormant in generic");
 	expect(result).not.toContain("memory dormant in generic");
 	expect(result).toContain("memory in generic");
+});
+
+const gated = (extra: object) =>
+	recall({
+		store,
+		state,
+		config,
+		cue: cueFor("acme"),
+		prompt: "memory in",
+		random: () => 0.5,
+		now,
+		...extra,
+	});
+
+test("the judge gate keeps what scores at or above the threshold, in activation order, and keeps an unanswered one", async () => {
+	await fake.retain("generic", [
+		{ content: "memory in extra one", tags: ["project:web"] },
+		{ content: "memory in extra two", tags: ["project:web"] },
+	]);
+	const plain = await gated({});
+	expect(plain.length).toBeGreaterThanOrEqual(4);
+	const [first, second, third, fourth] = plain.map((memory) => memory.id) as [
+		string,
+		string,
+		string,
+		string,
+	];
+	// The fourth sits exactly on the threshold and stays.
+	const judge = new FakeJudge({
+		probabilities: { [first]: 0.9, [second]: 0.2, [fourth]: 0.5 },
+		skip: [third],
+	});
+	const errors: unknown[] = [];
+	const result = await gated({
+		judge,
+		judgeThreshold: 0.5,
+		onJudgeError: (error: unknown) => errors.push(error),
+	});
+	expect(result.map((memory) => memory.id)).toEqual(
+		plain.map((m) => m.id).filter((id) => id !== second),
+	);
+	expect(judge.calls).toBe(1);
+	expect(errors).toHaveLength(1);
+});
+
+test("without a judge the result is unchanged and no judge is called", async () => {
+	const judge = new FakeJudge();
+	const plain = await gated({});
+	// A judge without a threshold is not a gate either.
+	expect(await gated({ judge })).toEqual(plain);
+	expect(judge.calls).toBe(0);
+});
+
+test("a judge that throws leaves the list unfiltered and is reported once", async () => {
+	const plain = await gated({});
+	const errors: unknown[] = [];
+	const result = await gated({
+		judge: new FakeJudge({ failWith: new Error("judge down") }),
+		judgeThreshold: 0.9,
+		onJudgeError: (error: unknown) => errors.push(error),
+	});
+	expect(result).toEqual(plain);
+	expect(errors).toHaveLength(1);
+});
+
+test("a prompt holding a secret is not sent to the judge", async () => {
+	const judge = new FakeJudge();
+	const result = await gated({ judge, judgeThreshold: 0.9, prompt: "key AKIAIOSFODNN7EXAMPLE" });
+	expect(judge.calls).toBe(0);
+	expect(result.length).toBeGreaterThan(0);
 });

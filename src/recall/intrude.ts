@@ -2,6 +2,8 @@ import { basename, dirname } from "node:path";
 import { retrievalProbability } from "../activation/act-r.js";
 import type { Config } from "../config/config.js";
 import { type Cue, cueText } from "../cue/cue.js";
+import type { Judge } from "../judge/types.js";
+import { containsSecret } from "../retain/filter.js";
 import type { LocalState } from "../state/state.js";
 import type { MemoryStore } from "../store/types.js";
 import { recall } from "./pipeline.js";
@@ -100,6 +102,13 @@ export interface IntrudeInput {
 	toolName: string;
 	toolInput: unknown;
 	onFanError?: (bank: string, error: unknown) => void;
+	/**
+	 * Judges the one memory the decision chose against `config.judge.intrusionThreshold`; nothing
+	 * surfaces below it. A failing judge, or one that leaves the memory unanswered, is reported to
+	 * `onJudgeError`: a failure surfaces nothing, an unanswered memory is kept.
+	 */
+	judge?: Judge | undefined;
+	onJudgeError?: (error: unknown) => void;
 	/** Activation noise of the recall. */
 	random?: () => number;
 	/** The decision draw; defaults to `random`. */
@@ -121,6 +130,8 @@ export async function intrude({
 	toolName,
 	toolInput,
 	onFanError,
+	judge,
+	onJudgeError,
 	random = Math.random,
 	draw = random,
 	now = new Date(),
@@ -139,5 +150,19 @@ export async function intrude({
 		now,
 		...(onFanError && { onFanError }),
 	});
-	return decideIntrusion({ ranked, config, random: draw, toolCallsSinceLast });
+	const chosen = decideIntrusion({ ranked, config, random: draw, toolCallsSinceLast });
+	if (!chosen || !judge) return chosen;
+	// Text holding a secret never leaves the machine; the memory is then unjudged and kept.
+	if (containsSecret(target.query) || containsSecret(chosen.text)) return chosen;
+	try {
+		const [answer] = await judge.judge(target.query, [{ id: chosen.id, text: chosen.text }]);
+		if (!answer) {
+			onJudgeError?.(new Error("the judge left the chosen memory unanswered"));
+			return chosen;
+		}
+		return answer.useful >= config.judge.intrusionThreshold ? chosen : null;
+	} catch (error) {
+		onJudgeError?.(error);
+		return null;
+	}
 }

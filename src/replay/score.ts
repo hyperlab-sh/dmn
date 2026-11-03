@@ -11,7 +11,9 @@ export function readJudgements(path: string): Judgement[] {
 				item &&
 				typeof item.prompt === "number" &&
 				typeof item.id === "string" &&
-				(item.order === "store" || item.order === "activation") &&
+				(item.order === "store" ||
+					item.order === "activation" ||
+					item.order === "activation+judge") &&
 				(item.useful === null || typeof item.useful === "boolean") &&
 				(item.judge === undefined ||
 					(typeof item.judge?.useful === "number" && typeof item.judge?.level === "number")),
@@ -30,7 +32,7 @@ export function readJudgements(path: string): Judgement[] {
 export function score(
 	judgements: Judgement[],
 	top: number,
-): { store: number; activation: number; judged: number } {
+): { store: number; activation: number; judged_order?: number; judged: number } {
 	const prompts = new Set(judgements.map((judgement) => judgement.prompt));
 	const precision = (order: Judgement["order"]): number => {
 		if (prompts.size === 0) return 0;
@@ -44,9 +46,11 @@ export function score(
 		// Whole counts first: summing fractions would drift (0.1 + 0.2).
 		return sum / (top * prompts.size);
 	};
+	const hasJudgedOrder = judgements.some((judgement) => judgement.order === "activation+judge");
 	return {
 		store: precision("store"),
 		activation: precision("activation"),
+		...(hasJudgedOrder && { judged_order: precision("activation+judge") }),
 		judged: judgements.filter((judgement) => judgement.useful !== null).length,
 	};
 }

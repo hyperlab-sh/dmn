@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../config/config.js";
+import { FakeJudge } from "../judge/fake.js";
 import { LocalState } from "../state/state.js";
 import type { FakeStore } from "../store/fake.js";
 import { readManifests } from "./manifests.js";
@@ -173,4 +174,53 @@ test("a run directory that already exists is never overwritten", async () => {
 	writeFileSync(join(directory, "judgements.json"), "[]");
 	expect(() => writeReport(result, directory)).toThrow(RunExistsError);
 	expect(readFileSync(join(directory, "judgements.json"), "utf8")).toBe("[]");
+});
+
+test("with a judge every entry gains the gated third list, written with the judge's answer", async () => {
+	const judge = new FakeJudge();
+	const result = await runReplay({
+		prompts,
+		store,
+		state,
+		config,
+		top: 5,
+		random: counter(),
+		now,
+		manifests: readManifests(fixture("manifests")),
+		judge,
+		judgeThreshold: 0.5,
+	});
+	// One batch per prompt; the activation list itself is the one a run without a judge makes.
+	expect(judge.calls).toBe(prompts.length);
+	expect(result.entries.map((entry) => entry.activation)).toEqual(
+		(await replay()).entries.map((entry) => entry.activation),
+	);
+	for (const entry of result.entries) {
+		for (const memory of entry.judged ?? []) {
+			expect(entry.judgements?.[memory.id]?.useful).toBeGreaterThanOrEqual(0.5);
+		}
+	}
+	const directory = join(scratch, "judged");
+	writeReport(result, directory);
+	const report = readFileSync(join(directory, "report.md"), "utf8");
+	expect(report).toContain("activation+judge:");
+	const judgements = JSON.parse(
+		readFileSync(join(directory, "judgements.json"), "utf8"),
+	) as Judgement[];
+	const third = judgements.filter((entry) => entry.order === "activation+judge");
+	expect(third.length).toBe(result.entries.reduce((sum, e) => sum + (e.judged?.length ?? 0), 0));
+	expect(third.length).toBeGreaterThan(0);
+	for (const entry of third) {
+		expect(entry.useful).toBe(true);
+		expect(entry.judge?.useful).toBeGreaterThanOrEqual(0.5);
+	}
+});
+
+test("a run without a judge has no third list", async () => {
+	const directory = join(scratch, "unjudged");
+	writeReport(await replay(), directory);
+	expect(readFileSync(join(directory, "report.md"), "utf8")).not.toContain("activation+judge");
+	expect(readFileSync(join(directory, "judgements.json"), "utf8")).not.toContain(
+		"activation+judge",
+	);
 });

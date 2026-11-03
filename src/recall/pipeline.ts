@@ -1,5 +1,7 @@
 import type { Config } from "../config/config.js";
 import { type Cue, cueText, softTags } from "../cue/cue.js";
+import type { Judge } from "../judge/types.js";
+import { containsSecret } from "../retain/filter.js";
 import type { LocalState } from "../state/state.js";
 import { bankFor } from "../store/hindsight.js";
 import type { MemoryRecord, MemoryStore } from "../store/types.js";
@@ -15,6 +17,11 @@ export interface RecallInput {
 	prompt?: string | undefined;
 	/** Called when a bank's tag counts cannot be fetched; recall carries on without them. */
 	onFanError?: (bank: string, error: unknown) => void;
+	/** With `judgeThreshold`: drops candidates the judge scores below it (one batch call). */
+	judge?: Judge | undefined;
+	judgeThreshold?: number | undefined;
+	/** Called when the judge fails (the list stays unfiltered) or leaves candidates unanswered. */
+	onJudgeError?: (error: unknown) => void;
 	random?: () => number;
 	now?: Date;
 }
@@ -29,6 +36,9 @@ export async function recall({
 	cue,
 	prompt,
 	onFanError,
+	judge,
+	judgeThreshold,
+	onJudgeError,
 	random = Math.random,
 	now = new Date(),
 }: RecallInput): Promise<RankedMemory[]> {
@@ -50,11 +60,50 @@ export async function recall({
 		seen.add(memory.id);
 		candidates.push(memory);
 	}
-	return rerank(candidates, cue, fans, {
+	const ranked = rerank(candidates, cue, fans, {
 		state,
 		parameters: config.activation,
 		promptThreshold: config.promptThreshold,
 		random,
 		now,
 	});
+	if (!judge || judgeThreshold === undefined || ranked.length === 0) return ranked;
+	return applyJudge(ranked, query.query, judge, judgeThreshold, onJudgeError);
+}
+
+/**
+ * Keeps the candidates the judge rates at or above `threshold`, in order. A candidate the judge
+ * did not answer is kept (a refused item is not evidence); a judge that fails leaves the list
+ * unfiltered. Either way `onJudgeError` hears of it once; recall never fails because of the judge.
+ */
+async function applyJudge(
+	ranked: RankedMemory[],
+	query: string,
+	judge: Judge,
+	threshold: number,
+	onJudgeError: ((error: unknown) => void) | undefined,
+): Promise<RankedMemory[]> {
+	// Text holding a secret never leaves the machine: such a prompt skips the gate, such a memory
+	// goes unjudged (and is kept).
+	if (containsSecret(query)) return ranked;
+	const sendable = ranked.filter((memory) => !containsSecret(memory.text));
+	if (sendable.length === 0) return ranked;
+	let answers: Awaited<ReturnType<Judge["judge"]>>;
+	try {
+		answers = await judge.judge(
+			query,
+			sendable.map(({ id, text }) => ({ id, text })),
+		);
+	} catch (error) {
+		onJudgeError?.(error);
+		return ranked;
+	}
+	const useful = new Map(answers.map((answer) => [answer.id, answer.useful]));
+	const unanswered = sendable.filter((memory) => !useful.has(memory.id)).length;
+	if (unanswered > 0) {
+		onJudgeError?.(new Error(`the judge left ${unanswered} of ${sendable.length} unanswered`));
+	}
+	return ranked.filter(
+		(memory) => (useful.get(memory.id) ?? Number.POSITIVE_INFINITY) >= threshold,
+	);
 }

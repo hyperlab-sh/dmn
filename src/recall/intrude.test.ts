@@ -1,7 +1,14 @@
-import { expect, test } from "bun:test";
+import { afterAll, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { intrusionDraw } from "../activation/random.js";
+import { loadConfig } from "../config/config.js";
 import type { Cue } from "../cue/cue.js";
-import { decideIntrusion, intrusionCue, isEligible } from "./intrude.js";
+import { FakeJudge } from "../judge/fake.js";
+import { LocalState } from "../state/state.js";
+import { FakeStore } from "../store/fake.js";
+import { decideIntrusion, intrude, intrusionCue, isEligible } from "./intrude.js";
 import type { RankedMemory } from "./rerank.js";
 
 const candidate = (id: string, activation: number): RankedMemory => ({
@@ -96,4 +103,58 @@ test("the query holds the tool's target words and the session cue's phrase", () 
 	const other = intrusionCue(cue, "WebSearch", { query: "anything" });
 	expect(other).toEqual({ cue, query: `${phrase} unknown` });
 	expect(intrusionCue(cue, "Read", undefined).query).toBe(`${phrase} unknown`);
+});
+
+const scratch = mkdtempSync(join(tmpdir(), "dmn-intrude-"));
+afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+
+test("with a judge the one chosen memory is judged and surfaces only at or above intrusionThreshold", async () => {
+	const state = new LocalState({ directory: scratch });
+	const store = new FakeStore();
+	await store.retain("generic", [{ content: "retry with jitter", tags: [] }]);
+	// A threshold far below the activation makes the decision draw certain.
+	const config = {
+		...loadConfig({ env: { DMN_STORE_URL: "fake:" }, configDir: join(scratch, "config") }),
+		intrusionThreshold: -100,
+	};
+	const run = (sessionId: string, judge?: FakeJudge) =>
+		intrude({
+			store,
+			state,
+			config,
+			cue,
+			sessionId,
+			toolName: "Read",
+			toolInput: { file_path: "/repo/retry.ts" },
+			random: () => 0.5,
+			...(judge && { judge }),
+		});
+	const chosen = await run("plain");
+	expect(chosen?.text).toBe("retry with jitter");
+	const id = chosen?.id ?? "";
+
+	const high = new FakeJudge({ probabilities: { [id]: config.judge.intrusionThreshold } });
+	expect((await run("high", high))?.id).toBe(id);
+	const low = new FakeJudge({ probabilities: { [id]: config.judge.intrusionThreshold - 0.01 } });
+	expect(await run("low", low)).toBeNull();
+	expect({ calls: low.calls, judged: low.judged }).toEqual({ calls: 1, judged: 1 });
+
+	// A judge that fails costs the thought, and is reported.
+	const errors: unknown[] = [];
+	const failing = new FakeJudge({ failWith: new Error("down") });
+	const surfaced = await intrude({
+		store,
+		state,
+		config,
+		cue,
+		sessionId: "fail",
+		toolName: "Read",
+		toolInput: { file_path: "/repo/retry.ts" },
+		random: () => 0.5,
+		judge: failing,
+		onJudgeError: (error) => errors.push(error),
+	});
+	expect(surfaced).toBeNull();
+	expect(errors).toHaveLength(1);
+	state.close();
 });

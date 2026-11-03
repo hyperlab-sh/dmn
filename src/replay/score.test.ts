@@ -50,3 +50,23 @@ test("the summary says unscored, then is rewritten in place with both numbers", 
 	expect(report).toContain("| activation | 0.60 |");
 	expect(report).toContain("judged 20/20");
 });
+
+test("a third row appears only when activation+judge entries exist", () => {
+	const third = [
+		{ prompt: 1, id: "a", order: "activation+judge" as const, useful: true },
+		{ prompt: 1, id: "b", order: "activation+judge" as const, useful: null },
+		{ prompt: 2, id: "c", order: "activation+judge" as const, useful: true },
+	];
+	const result = score([...judgements, ...third], 5);
+	// Two useful among prompts 1 and 2, out of top 5 each.
+	expect(result.judged_order).toBeCloseTo(0.2);
+	expect(result.store).toBe(0.4);
+	expect(score(judgements, 5)).not.toHaveProperty("judged_order");
+
+	const directory = join(scratch, "three");
+	writeReport({ run: "run-y", top: 5, entries: [], warnings: [] }, directory);
+	writeSummary(directory, { ...result, total: 23, top: 5 });
+	expect(readFileSync(join(directory, "report.md"), "utf8")).toContain(
+		"| activation+judge | 0.20 |",
+	);
+});
