@@ -39,7 +39,9 @@ function annotateReport(report: string, judgements: Judgement[]): string {
 		.map((line) => {
 			const heading = /^### Prompt (\d+)/.exec(line);
 			if (heading) prompt = Number(heading[1]);
-			if (line === "store:" || line === "activation:") order = line.slice(0, -1);
+			if (line === "store:" || line === "activation:" || line === "activation+judge:") {
+				order = line.slice(0, -1);
+			}
 			const item = /^(\d+\. )(\S+)(?: P\(useful\)=\d\.\d\d)?(.*)$/.exec(line);
 			if (!item) return line;
 			const value = probability.get(`${prompt}\0${order}\0${item[2]}`);

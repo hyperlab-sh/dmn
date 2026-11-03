@@ -18,6 +18,7 @@ dmn replay ~/.claude/projects/<project>/<session>.jsonl [more.jsonl ...] [--top 
 | `--manifests <dir>`   | Directory whose `package.json`, `tsconfig.json`, `Cargo.toml`, `pyproject.toml` give the cue's stack.                                                                                    |
 | `--out <dir>`         | Where run directories go. Default: the `replayDir` config key.                                                                                                                           |
 | `--top <n>`           | List length and the `n` of precision@n. Default 5.                                                                                                                                       |
+| `--judge fake\|laya`  | Adds a third order, `activation+judge` (below). Only this flag does: a configured provider alone makes no replay call the network. `--threshold <p>` overrides `judge.threshold`.        |
 
 Each run writes `<out>/run-<timestamp>/report.md`, `judgements.json`, and the texts `replay judge`
 needs: `memories.json` (`{id: text}` of every shown memory) and `prompts.json` (`{number: prompt}`). `prompts.json` holds the full text of your prompts, so
@@ -79,6 +80,15 @@ dmn replay judge <run-dir> --judge fake  # keyword overlap, offline, for dry run
 - **Local model later.** The model behind the service is open weights (ModernBERT-large,
   Apache-2.0); `judge.baseUrl` lets a local server answer the same API.
 
+## The judge gate: a third order
+
+`dmn replay … --judge fake|laya` runs the activation list through the same gate the hooks use
+(one judge call per prompt, candidates below `judge.threshold` dropped, unanswered ones kept),
+then takes the top `n`. `report.md` gains an `activation+judge:` list per prompt, and
+`judgements.json` gains entries with `order: "activation+judge"` whose `judge: {useful, level}`
+is already filled, so `replay judge` has nothing left to ask for them. The `store` and `activation`
+lists are unchanged by the flag. Use `fake` offline, `laya` for the real gate.
+
 ## Score
 
 ```bash
@@ -95,7 +105,8 @@ Precision@n, where n is the run's `top` (recorded in the report; `--top` overrid
 memories among a prompt's first n shown, over n, averaged over the prompts. A shorter list is
 still divided by n. Entries left at `null` count as not useful; `judged` says how many you
 filled in. The command rewrites the `## Summary` section of `report.md` with both numbers side
-by side (before scoring it says `unscored`).
+by side (before scoring it says `unscored`). A run made with `--judge` also prints, and writes, an
+`activation+judge p@n` row; runs without one score as before.
 
 Read the number as a comparison on your own prompts, not an absolute: a gap of one memory per
 prompt on a few dozen prompts is signal; a gap on five prompts is noise, and the activation

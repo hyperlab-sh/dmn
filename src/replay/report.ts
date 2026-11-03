@@ -7,7 +7,7 @@ import type { ReplayResult } from "./run.js";
 export interface Judgement {
 	prompt: number;
 	id: string;
-	order: "store" | "activation";
+	order: "store" | "activation" | "activation+judge";
 	useful: boolean | null;
 	/** Set by `replay judge`: the calibrated probability behind `useful`, and the expected level. */
 	judge?: { useful: number; level: number };
@@ -16,6 +16,8 @@ export interface Judgement {
 export interface Scores {
 	store: number;
 	activation: number;
+	/** Precision of the judge-gated order; present only for runs that have one. */
+	judged_order?: number;
 	judged: number;
 	total: number;
 	top: number;
@@ -56,6 +58,9 @@ export function renderSummary(scores?: Scores): string {
 		"|---|---|",
 		`| store | ${scores.store.toFixed(2)} |`,
 		`| activation | ${scores.activation.toFixed(2)} |`,
+		...(scores.judged_order === undefined
+			? []
+			: [`| activation+judge | ${scores.judged_order.toFixed(2)} |`]),
 		"",
 		`judged ${scores.judged}/${scores.total}`,
 		"",
@@ -72,7 +77,8 @@ export function writeReport(result: ReplayResult, directory: string): void {
 	for (const entry of result.entries) {
 		// A prompt holding a secret is never persisted in full or sent to the judge.
 		if (!containsSecret(entry.prompt.text)) prompts[entry.number] = entry.prompt.text;
-		for (const memory of [...entry.store, ...entry.activation]) memories[memory.id] = memory.text;
+		for (const memory of [...entry.store, ...entry.activation, ...(entry.judged ?? [])])
+			memories[memory.id] = memory.text;
 		lines.push(
 			`### Prompt ${entry.number}${entry.prompt.at ? ` (${entry.prompt.at})` : ""}`,
 			"",
@@ -94,6 +100,23 @@ export function writeReport(result: ReplayResult, directory: string): void {
 			);
 			judgements.push({ prompt: entry.number, id: memory.id, order: "activation", useful: null });
 		});
+		if (entry.judged) {
+			lines.push("", "activation+judge:");
+			entry.judged.forEach((memory, rank) => {
+				const answer = entry.judgements?.[memory.id];
+				lines.push(
+					`${rank + 1}. ${memory.id}${answer ? ` P(useful)=${answer.useful.toFixed(2)}` : ""} A=${number(memory.activation)} ${oneLine(memory.text, 80)}`,
+				);
+				judgements.push({
+					prompt: entry.number,
+					id: memory.id,
+					order: "activation+judge",
+					// Kept by the gate at the run's threshold; an unanswered one has no verdict.
+					useful: answer ? true : null,
+					...(answer && { judge: { useful: answer.useful, level: answer.level } }),
+				});
+			});
+		}
 		lines.push("");
 	}
 	lines.push(renderSummary());

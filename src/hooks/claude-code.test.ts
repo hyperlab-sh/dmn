@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../config/config.js";
+import { FakeJudge } from "../judge/fake.js";
 import { LocalState } from "../state/state.js";
 import { FakeStore } from "../store/fake.js";
 import type { RecallQuery, RetainItem } from "../store/types.js";
@@ -268,4 +269,51 @@ test("stop records one co-use edge per turn for the cited, known ids", async () 
 	expect(calls).toHaveLength(1);
 	expect([...(calls[0]?.[0] ?? [])].sort()).toEqual([g, d].sort());
 	expect(state.associations(g)).toEqual([{ id: d, weight: 1 }]);
+});
+
+test("a judge gates the prompt injection and the intrusive thought by their own thresholds", async () => {
+	const own = new FakeStore();
+	await own.retain("generic", [{ content: "retry with jitter", tags: [] }]);
+	const id = (await own.list("generic", { limit: 1, offset: 0 }))[0]?.id ?? "";
+	const withJudge = (useful: number, extra: object = {}) => ({
+		...deps,
+		store: own,
+		judge: new FakeJudge({ probabilities: { [id]: useful } }),
+		...extra,
+	});
+	const prompt = event({ hook_event_name: "UserPromptSubmit", prompt: "retry with jitter" });
+	const config = {
+		...deps.config,
+		judge: { ...deps.config.judge, threshold: 0.4, intrusionThreshold: 0.8 },
+	};
+
+	expect(await handleHookEvent(prompt, withJudge(0.39, { config }))).toBeNull();
+	expect(
+		(await handleHookEvent(prompt, withJudge(0.4, { config })))?.hookSpecificOutput
+			.additionalContext,
+	).toContain("retry with jitter");
+
+	// 0.5 passes the prompt gate (0.4) but not the intrusive one (0.8).
+	const eagerConfig = { ...config, intrusionThreshold: -100 };
+	expect(
+		await handleHookEvent(postTool("judged-low"), withJudge(0.5, { config: eagerConfig })),
+	).toBeNull();
+	expect(
+		await handleHookEvent(postTool("judged-high"), withJudge(0.8, { config: eagerConfig })),
+	).not.toBeNull();
+});
+
+test("a judge that fails warns and leaves the prompt injection unfiltered and the thought lost", async () => {
+	const warnings: string[] = [];
+	const failing = {
+		...deps,
+		judge: new FakeJudge({ failWith: new Error("judge down") }),
+		onWarning: (message: string) => warnings.push(message),
+	};
+	const output = await handleHookEvent(
+		event({ hook_event_name: "UserPromptSubmit", prompt: "retry" }),
+		failing,
+	);
+	expect(output?.hookSpecificOutput.additionalContext).toContain("retry with jitter");
+	expect(warnings).toEqual(["dmn: judge: judge down"]);
 });

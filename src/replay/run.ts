@@ -2,8 +2,10 @@ import { readFileSync } from "node:fs";
 import type { Config } from "../config/config.js";
 import { buildCue, type Cue, cueText, softTags } from "../cue/cue.js";
 import type { Manifest } from "../cue/stack.js";
+import type { Judge, Judgement } from "../judge/types.js";
 import { recall } from "../recall/pipeline.js";
 import type { RankedMemory } from "../recall/rerank.js";
+import { containsSecret } from "../retain/filter.js";
 import type { LocalState } from "../state/state.js";
 import { FakeStore } from "../store/fake.js";
 import { bankFor } from "../store/hindsight.js";
@@ -19,6 +21,10 @@ export interface ReplayEntry {
 	store: MemoryRecord[];
 	/** The activation order the hooks would inject. */
 	activation: RankedMemory[];
+	/** With a judge: the activation order through the gate at `judgeThreshold`, then top-N. */
+	judged?: RankedMemory[];
+	/** The judge's answer for each memory it answered, by id. */
+	judgements?: Record<string, { useful: number; level: number }>;
 }
 
 export interface ReplayResult {
@@ -40,6 +46,43 @@ export interface ReplayOptions {
 	now: Date;
 	/** Manifests of the project the transcripts came from; none when omitted. */
 	manifests?: Manifest[];
+	/** Adds the `activation+judge` list; the judge sees one batch per prompt. */
+	judge?: Judge;
+	/** Bar for the gate; required with `judge`. */
+	judgeThreshold?: number;
+}
+
+/**
+ * The ranked list through the judge gate: keeps what scores at or above `threshold` and what
+ * the judge did not answer. A prompt or memory holding a secret is not sent, and is kept.
+ */
+async function gate(
+	judge: Judge,
+	threshold: number,
+	query: string,
+	ranked: RankedMemory[],
+	warnings: string[],
+): Promise<{ kept: RankedMemory[]; answers: Record<string, Judgement> }> {
+	const answers: Record<string, Judgement> = {};
+	const sendable = containsSecret(query) ? [] : ranked.filter((m) => !containsSecret(m.text));
+	if (sendable.length === 0) return { kept: ranked, answers };
+	try {
+		for (const answer of await judge.judge(
+			query,
+			sendable.map(({ id, text }) => ({ id, text })),
+		)) {
+			answers[answer.id] = answer;
+		}
+	} catch (error) {
+		warnings.push(`judge unavailable: ${(error as Error).message}`);
+		return { kept: ranked, answers };
+	}
+	return {
+		kept: ranked.filter(
+			(memory) => (answers[memory.id]?.useful ?? Number.POSITIVE_INFINITY) >= threshold,
+		),
+		answers,
+	};
 }
 
 /** Candidates in the store's own order: each bank's results merged by score, ties by bank order. */
@@ -79,6 +122,8 @@ export async function runReplay({
 	random,
 	now,
 	manifests = [],
+	judge,
+	judgeThreshold = 0.5,
 }: ReplayOptions): Promise<ReplayResult> {
 	const warnings: string[] = [];
 	const entries: ReplayEntry[] = [];
@@ -110,6 +155,8 @@ export async function runReplay({
 			prompt.text.trim() || cueText(cue),
 			softTags(cue),
 		);
+		const query = prompt.text.trim() || cueText(cue);
+		const gated = judge ? await gate(judge, judgeThreshold, query, ranked, warnings) : undefined;
 		const dormant = (memory: MemoryRecord) => state.isDormant(memory.id);
 		entries.push({
 			number: entries.length + 1,
@@ -117,6 +164,12 @@ export async function runReplay({
 			cue,
 			store: byStore.filter((memory) => !dormant(memory)).slice(0, top),
 			activation: ranked.slice(0, top),
+			...(gated && {
+				judged: gated.kept.slice(0, top),
+				judgements: Object.fromEntries(
+					Object.entries(gated.answers).map(([id, { useful, level }]) => [id, { useful, level }]),
+				),
+			}),
 		});
 	}
 	return { run: runName(now), top, entries, warnings };

@@ -16,7 +16,7 @@ import type { MemoryStore } from "../../store/types.js";
 
 const usage = `Usage:
   dmn replay <transcript.jsonl>... [--store fake|<url>] [--out <dir>] [--top 5]
-             [--memories <json>] [--manifests <dir>]
+             [--memories <json>] [--manifests <dir>] [--judge fake|laya]
   dmn replay score <run-dir> [--top 5]
   dmn replay judge <run-dir> [--threshold <p>] [--judge fake|laya]
 `;
@@ -108,8 +108,22 @@ function scoreCommand(argv: string[]): number {
 	writeSummary(directory, { ...result, total: judgements.length, top });
 	console.log(`store p@${top} = ${result.store.toFixed(2)}`);
 	console.log(`activation p@${top} = ${result.activation.toFixed(2)}`);
+	if (result.judged_order !== undefined) {
+		console.log(`activation+judge p@${top} = ${result.judged_order.toFixed(2)}`);
+	}
 	console.log(`judged ${result.judged}/${judgements.length}`);
 	return 0;
+}
+
+/** The judge `--judge` names, else the configured one; undefined when neither is set. */
+function judgeFor(
+	flag: "fake" | "laya" | undefined,
+	config: ReturnType<typeof loadConfig>,
+	env: Record<string, string | undefined>,
+): Judge | undefined {
+	if (flag === "fake") return new FakeJudge();
+	const provider = flag ?? config.judge.provider;
+	return createJudge({ ...config, judge: { ...config.judge, provider } }, env);
 }
 
 async function judgeCommand(argv: string[]): Promise<number> {
@@ -121,17 +135,11 @@ async function judgeCommand(argv: string[]): Promise<number> {
 	const env = process.env;
 	// The judge never touches the store.
 	const config = loadConfig({ env, requireStore: false });
-	let judge: Judge | undefined;
-	if (options.judge === "fake") {
-		judge = new FakeJudge();
-	} else {
-		const provider = options.judge ?? config.judge.provider;
-		judge = createJudge({ ...config, judge: { ...config.judge, provider } }, env);
-		if (!judge) {
-			throw new UsageError(
-				'no judge is configured; pass --judge fake|laya or set "judge": {"provider": "laya"} in config.json',
-			);
-		}
+	const judge = judgeFor(options.judge, config, env);
+	if (!judge) {
+		throw new UsageError(
+			'no judge is configured; pass --judge fake|laya or set "judge": {"provider": "laya"} in config.json',
+		);
 	}
 	const threshold = options.threshold ?? config.judge.threshold;
 	const { judged, total, error } = await judgeRun(directory, judge, threshold);
@@ -166,6 +174,9 @@ async function replayCommand(argv: string[]): Promise<number> {
 		store = createStore(config);
 	}
 	const manifests: Manifest[] = options.manifests ? readManifests(options.manifests) : [];
+	// Only an explicit --judge adds the third order: a configured provider alone does not make a
+	// replay call the network.
+	const judge = options.judge ? judgeFor(options.judge, config, process.env) : undefined;
 	const prompts = options.files.flatMap((file) => promptsFrom(file));
 
 	// Known before the replay starts: refuse early rather than after every store query.
@@ -185,6 +196,7 @@ async function replayCommand(argv: string[]): Promise<number> {
 			random,
 			now,
 			manifests,
+			...(judge && { judge, judgeThreshold: options.threshold ?? config.judge.threshold }),
 		});
 		writeReport(result, directory);
 		for (const warning of result.warnings) process.stderr.write(`dmn: ${warning}\n`);

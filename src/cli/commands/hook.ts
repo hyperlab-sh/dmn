@@ -1,11 +1,18 @@
 import { intrusionDraw, intrusionNoise, seededRandom } from "../../activation/random.js";
-import { ConfigError, createStore, loadConfig, openState } from "../../config/config.js";
+import {
+	ConfigError,
+	createJudge,
+	createStore,
+	loadConfig,
+	openState,
+} from "../../config/config.js";
 import {
 	HookEventError,
 	type HookEventName,
 	handleHookEvent,
 	parseHookEvent,
 } from "../../hooks/claude-code.js";
+import type { Judge } from "../../judge/types.js";
 
 const eventBySubcommand: Record<string, HookEventName> = {
 	"session-start": "SessionStart",
@@ -18,6 +25,14 @@ async function readStdin(): Promise<string> {
 	const chunks: Buffer[] = [];
 	for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
 	return Buffer.concat(chunks).toString("utf8");
+}
+
+function judgeDep(
+	config: ReturnType<typeof loadConfig>,
+	env: Record<string, string | undefined>,
+): { judge?: Judge } {
+	const judge = createJudge(config, env);
+	return judge ? { judge } : {};
 }
 
 /** Runs `dmn hook <subcommand>`; returns the exit code. Output is the hook JSON, or nothing. */
@@ -67,6 +82,8 @@ export async function runHook(
 				store: createStore(storeConfig),
 				state,
 				config,
+				// Provider "none" builds no judge, so no code path can reach the network.
+				...judgeDep(config, env),
 				// DMN_SEED is for tests; otherwise a session's noise is stable per session id.
 				random: seededRandom(seed),
 				// Each tool call draws on its own: a fresh process would replay the session's draws.

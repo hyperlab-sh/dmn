@@ -1,6 +1,7 @@
 import type { Config } from "../config/config.js";
 import { buildCue, type Cue } from "../cue/cue.js";
 import { scanCueInput } from "../cue/scan.js";
+import type { Judge } from "../judge/types.js";
 import { formatInjection } from "../recall/inject.js";
 import { intrude } from "../recall/intrude.js";
 import { recall } from "../recall/pipeline.js";
@@ -52,6 +53,8 @@ export interface HookDeps {
 	/** The intrusive thought's decision draw; `random` when absent. */
 	draw?: () => number;
 	now?: Date;
+	/** Gates prompt-time injections and intrusive thoughts; absent when `judge.provider` is `none`. */
+	judge?: Judge;
 	/** Receives non-fatal problems (a failed fan count); stderr in the CLI. */
 	onWarning?: (message: string) => void;
 }
@@ -115,8 +118,11 @@ function cueFor(event: HookEvent, config: Config): Cue {
 	);
 }
 
+const judgeWarning = (onWarning: (message: string) => void) => (error: unknown) =>
+	onWarning(`dmn: judge: ${(error as Error).message}`);
+
 async function inject(event: HookEvent, deps: HookDeps): Promise<HookOutput> {
-	const { store, state, config, random, now, onWarning } = deps;
+	const { store, state, config, random, now, onWarning, judge } = deps;
 	const cue = cueFor(event, config);
 	const ranked = await recall({
 		store,
@@ -127,6 +133,11 @@ async function inject(event: HookEvent, deps: HookDeps): Promise<HookOutput> {
 		...(onWarning && {
 			onFanError: (bank, error) =>
 				onWarning(`dmn: tag counts for bank ${bank} unavailable: ${(error as Error).message}`),
+		}),
+		...(judge && {
+			judge,
+			judgeThreshold: config.judge.threshold,
+			...(onWarning && { onJudgeError: judgeWarning(onWarning) }),
 		}),
 		...(random && { random }),
 		...(now && { now }),
@@ -170,7 +181,7 @@ async function finishTurn(event: HookEvent, deps: HookDeps): Promise<HookOutput>
 
 /** After a tool call, rarely, one memory as a single line; nothing otherwise. Never an error. */
 async function intrusiveThought(event: HookEvent, deps: HookDeps): Promise<HookOutput> {
-	const { store, state, config, random, draw, now, onWarning } = deps;
+	const { store, state, config, random, draw, now, onWarning, judge } = deps;
 	let memory: Awaited<ReturnType<typeof intrude>>;
 	try {
 		memory = await intrude({
@@ -185,6 +196,7 @@ async function intrusiveThought(event: HookEvent, deps: HookDeps): Promise<HookO
 				onFanError: (bank: string, error: unknown) =>
 					onWarning(`dmn: tag counts for bank ${bank} unavailable: ${(error as Error).message}`),
 			}),
+			...(judge && { judge, ...(onWarning && { onJudgeError: judgeWarning(onWarning) }) }),
 			...(random && { random }),
 			...(draw && { draw }),
 			...(now && { now }),

@@ -129,3 +129,38 @@ test("replay judge exits 2 with no judge configured, and for a run without memor
 	expect(legacy.exitCode).toBe(2);
 	expect(legacy.stderr.toString()).toContain("memories.json");
 });
+
+test("replay --judge fake writes the third order, already judged, and score prints three rows", () => {
+	const out = join(scratch, "out-judged");
+	const run = dmn([
+		"replay",
+		"fixtures/replay/session-a.jsonl",
+		"fixtures/replay/session-b.jsonl",
+		"--store",
+		"fake",
+		"--out",
+		out,
+		"--top",
+		"3",
+		"--judge",
+		"fake",
+	]);
+	expect(run.stderr.toString()).toBe("");
+	expect(run.exitCode).toBe(0);
+	const directory = join(out, readdirSync(out)[0] as string);
+	expect(readFileSync(join(directory, "report.md"), "utf8")).toContain("activation+judge:");
+	const third = (
+		JSON.parse(readFileSync(join(directory, "judgements.json"), "utf8")) as {
+			order: string;
+			judge?: { useful: number; level: number };
+		}[]
+	).filter((entry) => entry.order === "activation+judge");
+	expect(third.length).toBeGreaterThan(0);
+	expect(third.every((entry) => entry.judge !== undefined)).toBe(true);
+
+	const scored = dmn(["replay", "score", directory]).stdout.toString();
+	expect(scored.split("\n").filter((line) => line.includes(" p@3 = "))).toHaveLength(3);
+	expect(scored).toContain("activation+judge p@3 = ");
+	// The run without --judge, scored the same way, prints the two old rows.
+	expect(dmn(["replay", "score", copyOfBase("old")]).stdout.toString()).not.toContain("+judge");
+});
