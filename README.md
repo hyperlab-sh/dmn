@@ -6,8 +6,8 @@
 [![npm](https://img.shields.io/npm/v/@hyperlab.sh/dmn)](https://www.npmjs.com/package/@hyperlab.sh/dmn)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**Status: pre-alpha.** There is nothing to install yet. This README describes what dmn is for and
-how it will work; [docs/design.md](docs/design.md) has the reasoning,
+**Status: pre-alpha.** Hooks and `dmn install` work against a Hindsight store; the rest of what
+this README describes is still to come. [docs/design.md](docs/design.md) has the reasoning,
 [docs/configuration.md](docs/configuration.md) lists the settings and the install steps, and
 [docs/replay.md](docs/replay.md) describes the replay harness that measures it on past sessions.
 

@@ -55,13 +55,18 @@ With that file, a session in `/work/lab/some-space/...` recalls from the `hyperl
 ## Install
 
 1. Start a store and export `DMN_STORE_URL` in the environment Claude Code runs in.
-2. Run `dmn install`. It adds four command hooks to `~/.claude/settings.json` (or the file given
-   with `--settings <path>`): `SessionStart` and `UserPromptSubmit` inject memories,
+2. Run `dmn install`. It adds four command hooks to `~/.claude/settings.json` (under
+   `$CLAUDE_CONFIG_DIR` when that is set, or the file given with `--settings <path>`): `SessionStart` and `UserPromptSubmit` inject memories,
    `PostToolUse` is reserved for the intrusive path, `Stop` retains the last turns and counts
    cited memories. Running it again changes nothing; other hooks and keys are kept.
 3. Restart Claude Code.
 
-`dmn hook` uses `bun:sqlite`, so the `dmn` command must run under Bun.
+`dmn hook` uses `bun:sqlite`, so the `dmn` binary starts with `#!/usr/bin/env bun` and Bun must be
+on the `PATH` of Claude Code. The library export (`@hyperlab.sh/dmn`) still loads under Node.
+
+A missing `DMN_STORE_URL` exits `dmn hook user-prompt` with status 2 (Claude Code then discards
+the prompt, so the message is seen). Every other hook exits 1, which Claude Code does not treat as
+a block.
 
 A memory counts as used only when the assistant cites its `[m:<id>]` marker. Turns that are
 protocol traffic, or that hold a token, a key or a `.env` assignment, are never retained.

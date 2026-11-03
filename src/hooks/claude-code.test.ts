@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { loadConfig } from "../config/config.js";
 import { LocalState } from "../state/state.js";
 import { FakeStore } from "../store/fake.js";
+import type { MemoryStore } from "../store/types.js";
 import { type HookDeps, HookEventError, handleHookEvent, parseHookEvent } from "./claude-code.js";
 
 let directory: string;
@@ -96,4 +97,33 @@ test("stop without a transcript, or with an empty one, does nothing", async () =
 		await handleHookEvent(event({ hook_event_name: "Stop", transcript_path: empty }), deps),
 	).toBeNull();
 	expect(await store.listTags("generic")).toEqual([]);
+});
+
+test("stop during a stop-hook continuation does nothing", async () => {
+	const transcript = join(directory, "turn.jsonl");
+	writeFileSync(
+		transcript,
+		[
+			{ type: "user", uuid: "u", message: { role: "user", content: "How do retries work?" } },
+			{ type: "assistant", uuid: "a", message: { role: "assistant", content: "With jitter." } },
+		]
+			.map((entry) => JSON.stringify(entry))
+			.join("\n"),
+	);
+	const stop = { hook_event_name: "Stop", transcript_path: transcript };
+	await handleHookEvent(event({ ...stop, stop_hook_active: true }), deps);
+	expect(await store.listTags("generic")).toEqual([]);
+	const retained: unknown[] = [];
+	const spy: MemoryStore = {
+		...store,
+		get: (bank, id) => store.get(bank, id),
+		retain: (bank, items, options) => {
+			retained.push(options);
+			return store.retain(bank, items);
+		},
+	} as MemoryStore;
+	await handleHookEvent(event(stop), { ...deps, store: spy });
+	expect((await store.listTags("generic")).map(({ tag }) => tag)).toContain("kind:turn");
+	// Fact extraction must not hold the hook up.
+	expect(retained).toEqual([{ async: true }]);
 });

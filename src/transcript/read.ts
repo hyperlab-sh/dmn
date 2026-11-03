@@ -1,8 +1,8 @@
-import { readFileSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 
 export type TranscriptEntry = {
-	/** Zero-based line number in the file. */
-	line: number;
+	/** Byte offset of the line in the file: stable, and unique within it. */
+	offset: number;
 	role?: "user" | "assistant";
 	uuid?: string;
 	/** Claude Code marks injected context (not typed by the user) with `isMeta`. */
@@ -13,12 +13,12 @@ export type TranscriptEntry = {
 export type LastTurns = {
 	user: string;
 	assistant: string;
-	/** The user entry's uuid, or `line-<n>` when it has none: one id per exchange. */
+	/** The user entry's uuid, or `[<namespace>:]offset-<n>` when it has none: one id per exchange. */
 	turnId: string;
 };
 
 /** Parses one transcript line; undefined for blank, malformed or message-less lines. */
-export function parseTranscriptLine(text: string, line: number): TranscriptEntry | undefined {
+export function parseTranscriptLine(text: string, offset: number): TranscriptEntry | undefined {
 	if (!text.trim()) return undefined;
 	let raw: {
 		type?: unknown;
@@ -37,7 +37,7 @@ export function parseTranscriptLine(text: string, line: number): TranscriptEntry
 	if (role !== "user" && role !== "assistant") return undefined;
 	if (raw.message === undefined) return undefined;
 	return {
-		line,
+		offset,
 		role,
 		...(typeof raw.uuid === "string" ? { uuid: raw.uuid } : {}),
 		meta: raw.isMeta === true,
@@ -45,25 +45,60 @@ export function parseTranscriptLine(text: string, line: number): TranscriptEntry
 	};
 }
 
-function readEntries(path: string): TranscriptEntry[] {
-	let text: string;
+const firstChunk = 64 * 1024;
+
+/**
+ * Entries from the end of the file, reading backwards in growing chunks until `enough` accepts
+ * them or the file starts. A chunk that starts mid-line drops that partial line.
+ */
+function readBackwards(
+	path: string,
+	enough: (entries: TranscriptEntry[]) => boolean,
+): TranscriptEntry[] {
+	let descriptor: number;
 	try {
-		text = readFileSync(path, "utf8");
+		descriptor = openSync(path, "r");
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
 		throw error;
 	}
-	const entries: TranscriptEntry[] = [];
-	for (const [line, content] of text.split("\n").entries()) {
-		const entry = parseTranscriptLine(content, line);
-		if (entry) entries.push(entry);
+	try {
+		const size = fstatSync(descriptor).size;
+		for (let length = firstChunk; ; length *= 2) {
+			const start = Math.max(0, size - length);
+			const buffer = Buffer.alloc(size - start);
+			readSync(descriptor, buffer, 0, buffer.length, start);
+			const entries: TranscriptEntry[] = [];
+			let lineStart = 0;
+			if (start > 0) {
+				const newline = buffer.indexOf(10);
+				if (newline === -1) {
+					if (length >= size) return [];
+					continue;
+				}
+				lineStart = newline + 1;
+			}
+			while (lineStart <= buffer.length) {
+				let lineEnd = buffer.indexOf(10, lineStart);
+				if (lineEnd === -1) lineEnd = buffer.length;
+				const entry = parseTranscriptLine(
+					buffer.toString("utf8", lineStart, lineEnd),
+					start + lineStart,
+				);
+				if (entry) entries.push(entry);
+				lineStart = lineEnd + 1;
+			}
+			if (start === 0 || enough(entries)) return entries;
+		}
+	} finally {
+		closeSync(descriptor);
 	}
-	return entries;
 }
 
 /** The last `count` parseable entries, oldest first. A missing file reads as empty. */
 export function readTranscriptTail(path: string, count: number): TranscriptEntry[] {
-	return count <= 0 ? [] : readEntries(path).slice(-count);
+	if (count <= 0) return [];
+	return readBackwards(path, (entries) => entries.length >= count).slice(-count);
 }
 
 /** The text blocks of an entry (or its string content), joined by newlines. */
@@ -79,21 +114,25 @@ export function entryText(entry: TranscriptEntry): string {
 		.join("\n");
 }
 
+/** Command output and interruption notices are written as user entries but are not prompts. */
+const notPrompt = /^\s*(?:<local-command-|\[Request interrupted)/;
+
+function isPrompt(entry: TranscriptEntry): boolean {
+	if (entry.role !== "user" || entry.meta) return false;
+	const text = entryText(entry);
+	return text.trim() !== "" && !notPrompt.test(text);
+}
+
 /**
  * The last prompt the user typed and everything the assistant said after it.
- * Tool results (user entries without text) and injected context do not start a turn.
+ * Tool results, injected context, command output and interruptions do not start a turn.
+ * `namespace` (the session id) prefixes the fallback id so sessions never share one.
  * Null when the transcript holds no user prompt.
  */
-export function lastTurns(path: string): LastTurns | null {
-	const entries = readEntries(path);
-	let start = -1;
-	for (let index = entries.length - 1; index >= 0; index--) {
-		const entry = entries[index];
-		if (entry?.role === "user" && !entry.meta && entryText(entry).trim()) {
-			start = index;
-			break;
-		}
-	}
+export function lastTurns(path: string, namespace?: string): LastTurns | null {
+	const entries = readBackwards(path, (found) => found.some(isPrompt));
+	let start = entries.length - 1;
+	while (start >= 0 && !isPrompt(entries[start] as TranscriptEntry)) start--;
 	const prompt = entries[start];
 	if (!prompt) return null;
 	const assistant = entries
@@ -102,9 +141,6 @@ export function lastTurns(path: string): LastTurns | null {
 		.map(entryText)
 		.filter((text) => text.trim())
 		.join("\n\n");
-	return {
-		user: entryText(prompt),
-		assistant,
-		turnId: prompt.uuid ?? `line-${prompt.line}`,
-	};
+	const fallback = `${namespace ? `${namespace}:` : ""}offset-${prompt.offset}`;
+	return { user: entryText(prompt), assistant, turnId: prompt.uuid ?? fallback };
 }

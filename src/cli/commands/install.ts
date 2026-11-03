@@ -26,7 +26,7 @@ function readSettings(path: string): ClaudeSettings {
 
 /** Runs `dmn install [--settings <path>]`; returns the exit code. */
 export function runInstall(args: string[], env: Record<string, string | undefined>): number {
-	let path = join(env.HOME ?? homedir(), ".claude", "settings.json");
+	let path = join(env.CLAUDE_CONFIG_DIR ?? join(env.HOME ?? homedir(), ".claude"), "settings.json");
 	for (let index = 0; index < args.length; index++) {
 		if (args[index] === "--settings" && args[index + 1]) {
 			path = args[++index] as string;

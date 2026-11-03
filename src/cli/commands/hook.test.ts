@@ -75,6 +75,8 @@ beforeAll(async () => {
 		XDG_STATE_HOME: join(scratch, "state"),
 		XDG_CONFIG_HOME: join(scratch, "config"),
 		DMN_SEED: seed,
+		// Fixed far in the future: every age is about the same, so only noise and uses rank.
+		DMN_NOW: "2100-01-01T00:00:00Z",
 	};
 	store = new HindsightStore({ baseUrl: server.url });
 	await store.retain(bankFor("acme"), [
@@ -101,7 +103,8 @@ test("session-start injects the organization's memories with their markers", asy
 
 test("user-prompt injects, and prints nothing when no memory matches", async () => {
 	const lines = injected(await run("user-prompt", "user-prompt.json"));
-	expect(new Set(markerIds(lines))).toEqual(new Set(Object.values(ids)));
+	const seeded = new Set(Object.values(ids));
+	expect(new Set(markerIds(lines).filter((id) => seeded.has(id as string)))).toEqual(seeded);
 
 	const empty = await run("user-prompt", "user-prompt.json", { cwd: emptyDirectory });
 	expect(empty).toMatchObject({ stdout: "", exitCode: 0 });
@@ -111,7 +114,7 @@ test("post-tool prints nothing", async () => {
 	expect(await run("post-tool", "post-tool.json")).toMatchObject({ stdout: "", exitCode: 0 });
 });
 
-test("stop retains both turns with the cue's tags and counts only cited memories", async () => {
+test("stop retains both turns with the cue's tags and counts no uncited or unknown memory", async () => {
 	expect(await run("stop", "stop.json")).toMatchObject({ stdout: "", exitCode: 0 });
 	const turns = (await store.list(bankFor("acme"), { limit: 20, offset: 0 })).filter((memory) =>
 		memory.tags.includes("kind:turn"),
@@ -127,8 +130,11 @@ test("stop retains both turns with the cue's tags and counts only cited memories
 
 	const state = new LocalState({ directory: join(scratch, "state", "dmn") });
 	try {
-		expect(state.uses("a1").useCount).toBe(1);
-		expect(state.uses("b2").useCount).toBe(1);
+		// The fixture cites a1 and b2, which the store does not know: made-up markers earn nothing.
+		expect(state.uses("a1").useCount).toBe(0);
+		expect(state.uses("b2").useCount).toBe(0);
+		// The seeded memories were injected by earlier runs and not cited: surfacing is not use.
+		for (const id of Object.values(ids)) expect(state.uses(id).useCount).toBe(0);
 	} finally {
 		state.close();
 	}
@@ -139,7 +145,7 @@ test("a memory cited at stop ranks above the others on the next prompt", async (
 	const order = async (hook: Promise<Hook>) =>
 		markerIds(injected(await hook)).filter((id) => seeded.has(id as string));
 	const before = await order(run("user-prompt", "user-prompt.json"));
-	const target = before[1] as string;
+	const target = ids["Sync worker retries are capped at five attempts."] as string;
 	const transcript = join(scratch, "cited.jsonl");
 	writeFileSync(
 		transcript,
@@ -156,6 +162,11 @@ test("a memory cited at stop ranks above the others on the next prompt", async (
 	);
 	await run("stop", "stop.json", { transcript });
 	const after = await order(run("user-prompt", "user-prompt.json"));
-	expect(before.indexOf(target)).toBe(1);
+	// Pinned: under DMN_SEED and DMN_NOW the cited memory starts second.
+	expect(before).toEqual([
+		ids["Retry delays in the sync worker use jitter."],
+		target,
+		ids["The sync worker logs every retry delay."],
+	]);
 	expect(after[0]).toBe(target);
 });

@@ -49,7 +49,9 @@ export async function runHook(
 	} catch (error) {
 		if (error instanceof ConfigError) {
 			process.stderr.write(`dmn: ${error.message}\n`);
-			return 2;
+			// Exit 2 is C-3's contract for user-prompt. Elsewhere Claude Code reads it as "block":
+			// a Stop hook would refuse to let the turn end, so those exit 1 (non-blocking).
+			return subcommand === "user-prompt" ? 2 : 1;
 		}
 		throw error;
 	}
@@ -58,6 +60,8 @@ export async function runHook(
 		if (event.name !== expected) {
 			throw new HookEventError(`hook ${subcommand} received a ${event.name} event`);
 		}
+		// Nothing to do until the intrusive path lands: no state, no store.
+		if (event.name === "PostToolUse") return 0;
 		const state = await openState(config);
 		try {
 			const output = await handleHookEvent(event, {
@@ -66,6 +70,8 @@ export async function runHook(
 				config,
 				// DMN_SEED is for tests; otherwise a session's noise is stable per session id.
 				random: seededRandom(env.DMN_SEED ?? event.sessionId),
+				// DMN_NOW (ISO date) is for tests, next to DMN_SEED.
+				...(env.DMN_NOW && { now: new Date(env.DMN_NOW) }),
 				onWarning: (message) => process.stderr.write(`${message}\n`),
 			});
 			if (output) process.stdout.write(`${JSON.stringify(output)}\n`);

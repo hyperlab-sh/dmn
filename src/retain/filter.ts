@@ -8,16 +8,24 @@ export type RetainVerdict = { retain: true } | { retain: false; reason: string }
 const secretPatterns: RegExp[] = [
 	/\bgh[pousr]_[A-Za-z0-9]{20,}/,
 	/\bgithub_pat_[A-Za-z0-9_]{20,}/,
+	/\bglpat-[A-Za-z0-9_-]{20,}/,
+	/\bnpm_[A-Za-z0-9]{36}\b/,
 	/\bsk-[A-Za-z0-9_-]{16,}/,
 	/\bBearer\s+[A-Za-z0-9._~+/=-]{16,}/i,
 	/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/,
+	/\bAIza[0-9A-Za-z_-]{35}\b/,
 	/\bxox[abprs]-[A-Za-z0-9-]{10,}/,
 	/-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+	// A password in a URL: scheme://user:password@host
+	/[a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:[^\s/@]+@/i,
 ];
 
 /** `KEY=value` with a sensitive word in the name, at the start of a line. */
 const envAssignment =
 	/^\s*(?:export\s+)?[A-Za-z0-9_]*(?:SECRET|TOKEN|KEY|PASSWORD)[A-Za-z0-9_]*\s*=\s*\S/im;
+/** `password: hunter2`, `"api_key": "..."`, `client_secret = ...`: dotenv, YAML and JSON forms. */
+const credentialAssignment =
+	/["']?[A-Za-z0-9_-]*(?:secret|token|password|passwd|api[_-]?key|private[_-]?key)[A-Za-z0-9_-]*["']?\s*[:=]\s*["']?[^\s"',]{6,}/i;
 
 const crossSession = /<channel[\s>]|\bmessage from session\b/i;
 const orchestration =
@@ -50,7 +58,9 @@ export function shouldRetain(turn: Turn): RetainVerdict {
 	if (secretPatterns.some((pattern) => pattern.test(text))) {
 		return { retain: false, reason: "secret" };
 	}
-	if (envAssignment.test(text)) return { retain: false, reason: "env-assignment" };
+	if (envAssignment.test(text) || credentialAssignment.test(text)) {
+		return { retain: false, reason: "credential-assignment" };
+	}
 	if (systemReminder.test(text)) return { retain: false, reason: "system-reminder" };
 	if (crossSession.test(text)) return { retain: false, reason: "cross-session-message" };
 	if (orchestration.test(text)) return { retain: false, reason: "orchestration-message" };

@@ -53,6 +53,7 @@
 		"lint": "biome check .",
 		"format": "biome check --write .",
 		"lint:package": "publint",
+		"check:bin": "head -1 dist/cli/index.js | grep -q '^#!/usr/bin/env bun$'",
 		"changeset": "changeset",
 		"version": "changeset version",
 		"release": "bun run build && changeset publish",

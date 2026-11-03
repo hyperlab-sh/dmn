@@ -10,7 +10,7 @@ export class SettingsError extends Error {
 }
 
 /** Claude Code event → the `dmn hook` subcommand that handles it. */
-export const dmnHooks: ReadonlyArray<{ event: HookEventName; subcommand: string }> = [
+const dmnHooks: ReadonlyArray<{ event: HookEventName; subcommand: string }> = [
 	{ event: "SessionStart", subcommand: "session-start" },
 	{ event: "UserPromptSubmit", subcommand: "user-prompt" },
 	{ event: "PostToolUse", subcommand: "post-tool" },
