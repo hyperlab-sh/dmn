@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ConfigError, loadConfig } from "../../config/config.js";
+import { JudgeError } from "../../judge/types.js";
 import { startFakeServer } from "../../store/fake.js";
 import { bankFor, HindsightStore } from "../../store/hindsight.js";
 import { hookJudge, runHook } from "./hook.js";
@@ -65,11 +66,15 @@ beforeAll(async () => {
 		{ content: "Sync worker retries are capped at five attempts.", tags: ["project:space"] },
 	]);
 	requests = [];
-	// Answers the Laya batch API: P(useful) is high only for the memory that mentions jitter.
+	// Answers the Laya batch API: P(useful) is high only for the memory that mentions jitter,
+	// and a probe naming the storm answers 429 with a Retry-After no hook could wait out.
 	judgeStub = Bun.serve({
 		port: 0,
 		async fetch(request) {
 			const body = (await request.json()) as { requests: { state: string }[] };
+			if (body.requests.some((item) => item.state.includes("judge storm probe"))) {
+				return new Response("nope", { status: 429, headers: { "retry-after": "60" } });
+			}
 			requests.push({
 				authorization: request.headers.get("authorization"),
 				states: body.requests.map((item) => item.state),
@@ -149,4 +154,27 @@ test("hookJudge: Stop builds a judge with a key, warns without one, builds none 
 	expect(() => hookJudge("UserPromptSubmit", config, {})).toThrow(ConfigError);
 	expect(() => hookJudge("PostToolUse", config, {})).toThrow(ConfigError);
 	expect(hookJudge("UserPromptSubmit", config, { LAYA_API_KEY: "k" })).toBeDefined();
+});
+
+test("the Stop judge hookJudge builds abandons a 429 storm at the store limit", async () => {
+	const configHome = join(scratch, "storm");
+	mkdirSync(join(configHome, "dmn"), { recursive: true });
+	writeFileSync(
+		join(configHome, "dmn", "config.json"),
+		JSON.stringify({
+			storeTimeoutMs: 1000,
+			judge: { provider: "laya", baseUrl: `http://localhost:${judgeStub.port}` },
+		}),
+	);
+	const config = loadConfig({
+		env: { DMN_STORE_URL: "fake:", HOME: scratch },
+		configDir: join(configHome, "dmn"),
+	});
+	const judge = hookJudge("Stop", config, { LAYA_API_KEY: "stub-key" });
+	expect(judge).toBeDefined();
+	// The stub's Retry-After of 60 s outlives the 1000 ms whole-call budget the hook set:
+	// the call is abandoned at the deadline instead of slept out to five attempts.
+	const error = await judge?.classify(["judge storm probe text"]).catch((thrown) => thrown);
+	expect(error).toBeInstanceOf(JudgeError);
+	expect((error as Error).message).toContain("deadline");
 });
