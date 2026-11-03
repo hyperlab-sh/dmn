@@ -58,6 +58,8 @@ dmn is a thin layer over existing stores, not a new database:
 - **Harness:** replay past sessions and score what would have been injected, so every retrieval
   change is measured.
 
+To run Hindsight locally, see [docs/hindsight.md](docs/hindsight.md).
+
 ## Roadmap
 
 1. Prove the thesis: Hindsight + hooks + activation layer + replay harness.
