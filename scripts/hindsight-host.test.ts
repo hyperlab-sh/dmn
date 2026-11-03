@@ -79,22 +79,20 @@ describe("hindsight-host.sh", () => {
 		expect(recorded).not.toContain("run ");
 	});
 
-	test("status reads HINDSIGHT_HOST_URL from the env file and prints healthy on a 200", async () => {
-		mkdirSync(join(scratch, "config", "dmn"), { recursive: true });
-		writeFileSync(
-			join(scratch, "config", "dmn", "hindsight.env"),
-			`HINDSIGHT_HOST_URL=http://127.0.0.1:${server.port}\n`,
-		);
-		const result = await run("status", {});
-		rmSync(join(scratch, "config"), { recursive: true, force: true });
+	test("status prints healthy and exits 0 on a 200", async () => {
+		const result = await run("status", { HINDSIGHT_HOST_URL: `http://127.0.0.1:${server.port}` });
 		expect(result.code).toBe(0);
 		expect(result.out.trim()).toBe("healthy");
 	});
 
-	test("status exits 1 on a non-200", async () => {
-		const result = await run("status", {
-			HINDSIGHT_HOST_URL: `http://127.0.0.1:${server.port}/down`,
-		});
+	test("status reads HINDSIGHT_HOST_URL from the env file and exits 1 on a 503", async () => {
+		mkdirSync(join(scratch, "config", "dmn"), { recursive: true });
+		writeFileSync(
+			join(scratch, "config", "dmn", "hindsight.env"),
+			`HINDSIGHT_HOST_URL=http://127.0.0.1:${server.port}/down\n`,
+		);
+		const result = await run("status", {});
+		rmSync(join(scratch, "config"), { recursive: true, force: true });
 		expect(result.code).toBe(1);
 		expect(result.out).toContain("unhealthy");
 	});
