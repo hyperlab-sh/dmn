@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { LocalState } from "../../state/state.js";
 import { startFakeServer } from "../../store/fake.js";
 import { bankFor, HindsightStore } from "../../store/hindsight.js";
+import { runSweep } from "./sweep.js";
 
 const root = new URL("../../..", import.meta.url).pathname;
 
@@ -79,6 +80,11 @@ test("sweep --dry-run reports without writing; sweep marks dormant; --revive cle
 	expect(real.stdout).toContain(`protected ${decision}`);
 	expect(dormant(plain)).toBe(true);
 	expect(dormant(decision)).toBe(false);
+
+	// In-process, no spawn: a conflicting flag refuses and leaves the memory dormant.
+	expect(await runSweep(["--revive", plain, "--dry-run"], env)).toBe(1);
+	expect(await runSweep(["--revive", plain, "--bank", "generic"], env)).toBe(1);
+	expect(dormant(plain)).toBe(true);
 
 	const revived = await dmn("--revive", plain);
 	expect(revived).toMatchObject({ stdout: `revived ${plain}\n`, exitCode: 0 });

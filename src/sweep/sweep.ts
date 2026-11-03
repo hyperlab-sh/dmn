@@ -19,7 +19,7 @@ export interface SweepInput {
 export interface SweepResult {
 	/** Every memory listed, including those skipped for lack of an age. */
 	examined: number;
-	/** Below the floor and unprotected; marked dormant unless this was a dry run. */
+	/** Below the floor, unprotected and not yet dormant; marked dormant unless this was a dry run. */
 	dormant: string[];
 	/** Below the floor but carrying a protected tag. */
 	protectedKept: string[];
@@ -57,6 +57,8 @@ export async function sweep({
 					result.protectedKept.push(memory.id);
 					continue;
 				}
+				// Already dormant: examined, but this run writes nothing for it.
+				if (state.isDormant(memory.id)) continue;
 				result.dormant.push(memory.id);
 				if (!dryRun) state.setDormant(memory.id);
 			}

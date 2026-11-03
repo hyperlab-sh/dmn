@@ -23,6 +23,10 @@ export async function runSweep(
 		process.stderr.write(`dmn: sweep: ${(error as Error).message}\n`);
 		return 1;
 	}
+	if (values.revive !== undefined && (values["dry-run"] || values.bank)) {
+		process.stderr.write("dmn: sweep: --revive cannot be combined with --dry-run or --bank\n");
+		return 1;
+	}
 	try {
 		const config = loadConfig({ env });
 		// DMN_NOW (ISO date) is for tests, as in `dmn hook`.

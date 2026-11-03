@@ -9,7 +9,7 @@ import {
 import { type Cue, softTags } from "../cue/cue.js";
 import type { MemoryUses } from "../state/state.js";
 import type { MemoryRecord } from "../store/types.js";
-import { lifetimeHours as ageInHours } from "./age.js";
+import { lifetimeHours } from "./age.js";
 
 export type RankedMemory = MemoryRecord & {
 	activation: number;
@@ -43,9 +43,9 @@ export function rerank(
 		.map((memory) => {
 			const uses = state.uses(memory.id);
 			// Unparseable dates count as brand new.
-			const lifetimeHours = ageInHours(memory.createdAt, uses.firstSeenAt, now) ?? 0;
+			const hours = lifetimeHours(memory.createdAt, uses.firstSeenAt, now) ?? 0;
 			// Creation counts as the first use.
-			const baseLevel = baseLevelActivation(uses.useCount + 1, lifetimeHours, parameters.decay);
+			const baseLevel = baseLevelActivation(uses.useCount + 1, hours, parameters.decay);
 			const shared: CueSource[] = memory.tags
 				.filter((tag) => cueTags.has(tag))
 				.map((tag) => ({ fan: fanCounts.get(tag) ?? 1 }));
