@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 import { runHook } from "./commands/hook.js";
 import { runInstall } from "./commands/install.js";
 

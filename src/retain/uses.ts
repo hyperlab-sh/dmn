@@ -17,9 +17,19 @@ export function recordUses(state: LocalState, ids: Iterable<string>, turnId: str
 	for (const id of ids) state.recordUse(id, turnId);
 }
 
-/** Counts the memories an assistant turn cites; returns their ids. */
-export function countCitedUses(state: LocalState, assistantText: string, turnId: string): string[] {
-	const ids = [...extractUses(assistantText)];
+/**
+ * Counts the memories an assistant turn cites; returns the ids counted. When `isKnown` is
+ * given, ids it rejects (made up, or pasted from elsewhere) are ignored.
+ */
+export async function countCitedUses(
+	state: LocalState,
+	assistantText: string,
+	turnId: string,
+	isKnown: (id: string) => Promise<boolean> = async () => true,
+): Promise<string[]> {
+	const cited = [...extractUses(assistantText)];
+	const known = await Promise.all(cited.map(isKnown));
+	const ids = cited.filter((_, index) => known[index]);
 	recordUses(state, ids, turnId);
 	return ids;
 }

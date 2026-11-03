@@ -6,12 +6,13 @@ import { recall } from "../recall/pipeline.js";
 import { retainTurns } from "../retain/retain.js";
 import { countCitedUses } from "../retain/uses.js";
 import type { LocalState } from "../state/state.js";
+import { bankFor } from "../store/hindsight.js";
 import type { MemoryStore } from "../store/types.js";
 import { lastTurns } from "../transcript/read.js";
 
 export type HookEventName = "SessionStart" | "UserPromptSubmit" | "PostToolUse" | "Stop";
 
-export const hookEventNames: readonly HookEventName[] = [
+const hookEventNames: readonly HookEventName[] = [
 	"SessionStart",
 	"UserPromptSubmit",
 	"PostToolUse",
@@ -130,13 +131,19 @@ async function inject(event: HookEvent, deps: HookDeps): Promise<HookOutput> {
 
 /** Counts cited memories first (local, cannot fail on the network), then retains the turns. */
 async function finishTurn(event: HookEvent, deps: HookDeps): Promise<HookOutput> {
-	if (!event.transcriptPath) return null;
-	const turns = lastTurns(event.transcriptPath);
+	// Our Stop hook never blocks, so a continuation is not ours; the turn was handled already.
+	if (event.stopHookActive || !event.transcriptPath) return null;
+	const turns = lastTurns(event.transcriptPath, event.sessionId);
 	if (!turns) return null;
-	countCitedUses(deps.state, turns.assistant, turns.turnId);
+	const cue = cueFor(event, deps.config);
+	const banks = [...new Set([bankFor(cue.organization), bankFor(undefined)])];
+	// A cited id counts only when the store knows it: hallucinated markers earn nothing.
+	const isKnown = async (id: string) =>
+		(await Promise.all(banks.map((bank) => deps.store.get(bank, id)))).some(Boolean);
+	await countCitedUses(deps.state, turns.assistant, turns.turnId, isKnown);
 	await retainTurns(
 		deps.store,
-		cueFor(event, deps.config),
+		cue,
 		[
 			{ role: "user", text: turns.user, documentId: turns.turnId },
 			{ role: "assistant", text: turns.assistant, documentId: turns.turnId },

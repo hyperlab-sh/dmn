@@ -50,7 +50,8 @@ export interface TagCount {
  * choosing banks is the caller's job through `bankFor`.
  */
 export interface MemoryStore {
-	retain(bank: string, items: RetainItem[]): Promise<void>;
+	/** `async: true` returns once the store has accepted the items, before it extracts facts. */
+	retain(bank: string, items: RetainItem[], options?: { async?: boolean }): Promise<void>;
 	recall(bank: string, query: RecallQuery): Promise<MemoryRecord[]>;
 	get(bank: string, id: string): Promise<MemoryRecord | null>;
 	list(bank: string, query: ListQuery): Promise<MemoryRecord[]>;

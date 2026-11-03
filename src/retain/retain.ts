@@ -34,6 +34,7 @@ export async function retainTurns(
 			...(turn.documentId !== undefined && { documentId: `${turn.documentId}:${turn.role}` }),
 		});
 	}
-	if (items.length > 0) await store.retain(bankFor(cue.organization), items);
+	// Fact extraction can take seconds; a hook must not wait for it.
+	if (items.length > 0) await store.retain(bankFor(cue.organization), items, { async: true });
 	return { retained: items.length, skipped };
 }

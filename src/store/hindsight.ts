@@ -125,7 +125,11 @@ export class HindsightStore implements MemoryStore {
 		return (await response.json()) as T;
 	}
 
-	async retain(bank: string, items: RetainItem[]): Promise<void> {
+	async retain(
+		bank: string,
+		items: RetainItem[],
+		options: { async?: boolean } = {},
+	): Promise<void> {
 		const wireItems = items.map((item) => ({
 			content: item.content,
 			tags: item.tags,
@@ -136,7 +140,7 @@ export class HindsightStore implements MemoryStore {
 		await this.request(
 			"POST",
 			this.url(bank, "/memories"),
-			{ items: wireItems, async: false },
+			{ items: wireItems, async: options.async ?? false },
 			this.retainTimeoutMs,
 		);
 	}

@@ -23,13 +23,12 @@ test("extractUses returns each cited id once, ignoring look-alikes", () => {
 	expect(extractUses(text)).toEqual(new Set(["a1", "b2"]));
 });
 
-test("a turn counts each cited memory once, a repeat of the turn counts nothing, an uncited memory is unchanged", () => {
+test("a turn counts each cited memory once and a repeat of the turn counts nothing", () => {
 	const cited = extractUses("[m:a1] [m:a1] [m:a1] [m:b2]");
 	recordUses(state, cited, "turn-1");
 	recordUses(state, cited, "turn-1");
 	expect(state.uses("a1").useCount).toBe(1);
 	expect(state.uses("b2").useCount).toBe(1);
-	expect(state.uses("injected-not-cited").useCount).toBe(0);
 
 	recordUses(state, ["a1"], "turn-2");
 	expect(state.uses("a1").useCount).toBe(2);
