@@ -11,7 +11,7 @@ Usage:
   dmn sweep [--bank <b>...] [--dry-run]   mark unused, unprotected memories dormant
   dmn sweep --revive <id>   clear a memory's dormancy
   dmn help
-  dmn replay <transcript.jsonl>... | dmn replay score <run-dir>
+  dmn replay <transcript.jsonl>... | dmn replay score <run-dir> | dmn replay judge <run-dir>
 
 See https://github.com/hyperlab-sh/dmn for the roadmap.
 `;

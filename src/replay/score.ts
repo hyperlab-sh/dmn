@@ -16,7 +16,10 @@ export function readJudgements(path: string): Judgement[] {
 				(item.judge === undefined ||
 					(typeof item.judge?.useful === "number" && typeof item.judge?.level === "number")),
 		);
-	if (!valid) throw new Error(`${path}: expected a list of {prompt, id, order, useful}`);
+	if (!valid)
+		throw new Error(
+			`${path}: expected a list of {prompt, id, order, useful, judge?: {useful, level}}`,
+		);
 	return parsed as Judgement[];
 }
 

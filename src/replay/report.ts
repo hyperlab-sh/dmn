@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Cue } from "../cue/cue.js";
+import { containsSecret } from "../retain/filter.js";
 import type { ReplayResult } from "./run.js";
 
 export interface Judgement {
@@ -69,7 +70,8 @@ export function writeReport(result: ReplayResult, directory: string): void {
 	const memories: Record<string, string> = {};
 	const prompts: Record<string, string> = {};
 	for (const entry of result.entries) {
-		prompts[entry.number] = entry.prompt.text;
+		// A prompt holding a secret is never persisted in full or sent to the judge.
+		if (!containsSecret(entry.prompt.text)) prompts[entry.number] = entry.prompt.text;
 		for (const memory of [...entry.store, ...entry.activation]) memories[memory.id] = memory.text;
 		lines.push(
 			`### Prompt ${entry.number}${entry.prompt.at ? ` (${entry.prompt.at})` : ""}`,

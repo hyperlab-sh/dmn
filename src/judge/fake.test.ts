@@ -8,7 +8,7 @@ test("probability follows keyword overlap, level scales it, counters count", asy
 		{ id: "b", text: "deploy through preview environments" },
 	]);
 	expect(out.map((j) => j.id)).toEqual(["a", "b"]);
-	expect(out[0]?.useful).toBeGreaterThan(0.3);
+	expect(out[0]?.useful).toBeCloseTo(0.6, 10);
 	expect(out[1]?.useful).toBe(0);
 	expect(out[0]?.level).toBeCloseTo((out[0]?.useful ?? 0) * 3);
 	expect(await judge.judge("", [{ id: "c", text: "" }])).toEqual([

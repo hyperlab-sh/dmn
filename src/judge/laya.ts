@@ -1,6 +1,6 @@
 import { type Judge, JudgeError, type JudgeMemory, type Judgement } from "./types.js";
 
-export const layaBaseUrl = "https://api.laya.studio";
+const layaBaseUrl = "https://api.laya.studio";
 const batchLimit = 64;
 const memoryLimit = 1500;
 const maxAttempts = 5;
@@ -11,17 +11,24 @@ export interface LayaOptions {
 	apiKey: string;
 	/** Default `https://api.laya.studio`; a local model server may answer the same API. */
 	baseUrl?: string;
-	/** Per-call limit. Default 5000. */
+	/** Per-call limit. Default 30000: a 64-item batch of 512-token inputs is not a hook. */
 	timeoutMs?: number;
 	fetch?: typeof fetch;
 	sleep?: (milliseconds: number) => Promise<void>;
 	random?: () => number;
+	/** Clock for `Retry-After` given as an HTTP date. */
+	now?: () => number;
 }
 
 const questions = {
 	useful: {
 		type: "noul",
-		instructions: "The memory tells the engineer something they need to do what the prompt asks.",
+		instructions: "Would the memory help the engineer do what the prompt asks?",
+		// An object: the API rejects a string here with invalid_request.
+		criteria: {
+			true: "The memory tells the engineer something they need to do what the prompt asks",
+			false: "The memory tells the engineer nothing they need to do what the prompt asks",
+		},
 	},
 	level: {
 		type: "score",
@@ -40,12 +47,14 @@ const state = (prompt: string, memory: JudgeMemory) =>
 
 const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value));
 
-/** Seconds from a `Retry-After` header, if it is a number. */
-function retryAfterMs(response: Response): number | undefined {
-	const seconds = Number(response.headers.get("retry-after"));
-	return response.headers.get("retry-after") && Number.isFinite(seconds) && seconds >= 0
-		? seconds * 1000
-		: undefined;
+/** Milliseconds a `Retry-After` header asks for: delay-seconds or an HTTP date. */
+function retryAfterMs(response: Response, now: number): number | undefined {
+	const header = response.headers.get("retry-after");
+	if (!header) return undefined;
+	const seconds = Number(header);
+	if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+	const date = Date.parse(header);
+	return Number.isNaN(date) ? undefined : Math.max(0, date - now);
 }
 
 /** Usefulness judge over Laya's `/v1/systemone/batch`, plain fetch. Sends prompt and memory text only. */
@@ -56,14 +65,16 @@ export class LayaJudge implements Judge {
 	private readonly fetcher: typeof fetch;
 	private readonly sleep: (milliseconds: number) => Promise<void>;
 	private readonly random: () => number;
+	private readonly now: () => number;
 
 	constructor({
 		apiKey,
 		baseUrl = layaBaseUrl,
-		timeoutMs = 5000,
+		timeoutMs = 30_000,
 		fetch: fetcher = globalThis.fetch,
 		sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
 		random = Math.random,
+		now = () => Date.now(),
 	}: LayaOptions) {
 		this.apiKey = apiKey;
 		this.url = `${baseUrl.replace(/\/+$/, "")}/v1/systemone/batch`;
@@ -71,6 +82,7 @@ export class LayaJudge implements Judge {
 		this.fetcher = fetcher;
 		this.sleep = sleep;
 		this.random = random;
+		this.now = now;
 	}
 
 	async judge(prompt: string, memories: JudgeMemory[]): Promise<Judgement[]> {
@@ -97,7 +109,15 @@ export class LayaJudge implements Judge {
 			} catch (error) {
 				throw new JudgeError(`POST ${this.url} failed: ${(error as Error).message}`, 0);
 			}
-			if (response.ok) return this.parse(await response.json(), memories);
+			if (response.ok) {
+				let payload: unknown;
+				try {
+					payload = await response.json();
+				} catch {
+					throw new JudgeError("response is not JSON", response.status);
+				}
+				return this.parse(payload, memories);
+			}
 			const retriable = response.status === 429 || response.status === 503;
 			if (!retriable || attempt === maxAttempts) {
 				throw new JudgeError(
@@ -106,7 +126,9 @@ export class LayaJudge implements Judge {
 				);
 			}
 			const backoff = baseDelayMs * 2 ** (attempt - 1) * (0.5 + this.random() / 2);
-			await this.sleep(Math.min(maxDelayMs, Math.max(retryAfterMs(response) ?? 0, backoff)));
+			await this.sleep(
+				Math.min(maxDelayMs, Math.max(retryAfterMs(response, this.now()) ?? 0, backoff)),
+			);
 		}
 	}
 

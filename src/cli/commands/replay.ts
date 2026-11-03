@@ -118,9 +118,9 @@ async function judgeCommand(argv: string[]): Promise<number> {
 	if (!directory || options.files.length > 1) {
 		throw new UsageError("judge takes exactly one run directory");
 	}
-	// The judge never touches the store, so a missing DMN_STORE_URL must not stop it.
-	const env = { ...process.env, DMN_STORE_URL: process.env.DMN_STORE_URL ?? "fake:" };
-	const config = loadConfig({ env });
+	const env = process.env;
+	// The judge never touches the store.
+	const config = loadConfig({ env, requireStore: false });
 	let judge: Judge | undefined;
 	if (options.judge === "fake") {
 		judge = new FakeJudge();
@@ -134,8 +134,13 @@ async function judgeCommand(argv: string[]): Promise<number> {
 		}
 	}
 	const threshold = options.threshold ?? config.judge.threshold;
-	const { judged, total } = await judgeRun(directory, judge, threshold);
+	const { judged, total, error } = await judgeRun(directory, judge, threshold);
 	console.log(`judged ${judged}/${total}`);
+	if (error) {
+		// Answers already paid for are on disk; running the command again resumes.
+		process.stderr.write(`dmn: ${error.message}\n`);
+		return 1;
+	}
 	return 0;
 }
 
