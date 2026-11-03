@@ -19,6 +19,7 @@ export function bankFor(organization: string | undefined): string {
 	return `org-${organization}`;
 }
 
+/** `status` is the HTTP status, or 0 when no response arrived or the data is unusable. */
 export class StoreError extends Error {
 	constructor(
 		message: string,
@@ -31,7 +32,8 @@ export class StoreError extends Error {
 
 export interface HindsightOptions {
 	baseUrl: string;
-	fetch?: typeof fetch;
+	/** Per-request limit, so a hung store cannot stall a hook. Default 2000. */
+	timeoutMs?: number;
 }
 
 interface WireMemory {
@@ -48,11 +50,13 @@ interface WireMemory {
 }
 
 function toRecord(wire: WireMemory): MemoryRecord {
+	const createdAt = wire.created_at ?? wire.date ?? wire.mentioned_at ?? wire.occurred_start;
+	if (!createdAt) throw new StoreError(`memory ${wire.id} has no timestamp`, 0);
 	const record: MemoryRecord = {
 		id: wire.id,
 		text: wire.text,
 		tags: wire.tags ?? [],
-		createdAt: wire.created_at ?? wire.date ?? wire.mentioned_at ?? wire.occurred_start ?? "",
+		createdAt,
 	};
 	if (wire.context) record.context = wire.context;
 	if (wire.metadata) record.metadata = wire.metadata;
@@ -70,11 +74,11 @@ function toRecord(wire: WireMemory): MemoryRecord {
 /** Hindsight over its REST API with plain `fetch`; no SDK, no runtime dependency. */
 export class HindsightStore implements MemoryStore {
 	private readonly baseUrl: string;
-	private readonly fetchImpl: typeof fetch;
+	private readonly timeoutMs: number;
 
-	constructor(options: HindsightOptions) {
-		this.baseUrl = options.baseUrl.replace(/\/+$/, "");
-		this.fetchImpl = options.fetch ?? fetch;
+	constructor({ baseUrl, timeoutMs = 2000 }: HindsightOptions) {
+		this.baseUrl = baseUrl.replace(/\/+$/, "");
+		this.timeoutMs = timeoutMs;
 	}
 
 	private url(bank: string, path: string, params?: URLSearchParams): string {
@@ -82,14 +86,18 @@ export class HindsightStore implements MemoryStore {
 		return `${this.baseUrl}/v1/default/banks/${encodeURIComponent(bank)}${path}${query}`;
 	}
 
-	private async request<T>(method: "GET" | "POST", url: string, body?: unknown): Promise<T | null> {
-		const init: RequestInit = { method };
+	private async request<T>(method: "GET" | "POST", url: string, body?: unknown): Promise<T> {
+		const init: RequestInit = { method, signal: AbortSignal.timeout(this.timeoutMs) };
 		if (body !== undefined) {
 			init.headers = { "content-type": "application/json" };
 			init.body = JSON.stringify(body);
 		}
-		const response = await this.fetchImpl(url, init);
-		if (response.status === 404 && method === "GET") return null;
+		let response: Response;
+		try {
+			response = await fetch(url, init);
+		} catch (error) {
+			throw new StoreError(`${method} ${url} failed: ${(error as Error).message}`, 0);
+		}
 		if (!response.ok) {
 			throw new StoreError(
 				`${method} ${url} failed: ${response.status} ${await response.text()}`,
@@ -120,41 +128,54 @@ export class HindsightStore implements MemoryStore {
 			this.url(bank, "/memories/recall"),
 			body,
 		);
-		return (response?.results ?? []).slice(0, query.topK).map(toRecord);
+		return response.results.slice(0, query.topK).map(toRecord);
 	}
 
 	async get(bank: string, id: string): Promise<MemoryRecord | null> {
-		const wire = await this.request<WireMemory>(
-			"GET",
-			this.url(bank, `/memories/${encodeURIComponent(id)}`),
-		);
-		return wire ? toRecord(wire) : null;
+		try {
+			const wire = await this.request<WireMemory>(
+				"GET",
+				this.url(bank, `/memories/${encodeURIComponent(id)}`),
+			);
+			return toRecord(wire);
+		} catch (error) {
+			if (error instanceof StoreError && error.status === 404) return null;
+			throw error;
+		}
 	}
 
 	async list(bank: string, query: ListQuery): Promise<MemoryRecord[]> {
 		const params = new URLSearchParams();
 		for (const tag of query.tags ?? []) params.append("tags", tag);
-		if (query.tagsMatch !== undefined) params.set("tags_match", query.tagsMatch);
 		params.set("limit", String(query.limit));
 		params.set("offset", String(query.offset));
 		const response = await this.request<{ items: WireMemory[] }>(
 			"GET",
 			this.url(bank, "/memories/list", params),
 		);
-		return (response?.items ?? []).map(toRecord);
+		return response.items.map(toRecord);
 	}
 
 	async listTags(bank: string): Promise<TagCount[]> {
 		const tags: TagCount[] = [];
 		for (let offset = 0; ; offset += tagPageSize) {
 			const params = new URLSearchParams({ limit: String(tagPageSize), offset: String(offset) });
-			const page = await this.request<{ items: TagCount[]; total: number }>(
-				"GET",
-				this.url(bank, "/tags", params),
-			);
-			const items = page?.items ?? [];
-			for (const item of items) tags.push({ tag: item.tag, count: item.count });
-			if (items.length === 0 || offset + items.length >= (page?.total ?? 0)) return tags;
+			let page: { items: TagCount[]; total: number };
+			try {
+				page = await this.request("GET", this.url(bank, "/tags", params));
+			} catch (error) {
+				// A bank nobody has written to yet has no tags; any other 404 is a wrong URL.
+				if (
+					error instanceof StoreError &&
+					error.status === 404 &&
+					/failed: 404 [\s\S]*bank/i.test(error.message)
+				) {
+					return [];
+				}
+				throw error;
+			}
+			for (const item of page.items) tags.push({ tag: item.tag, count: item.count });
+			if (page.items.length === 0 || offset + page.items.length >= page.total) return tags;
 		}
 	}
 }

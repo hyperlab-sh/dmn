@@ -38,6 +38,10 @@ CREATE TABLE IF NOT EXISTS co_use (
 	weight REAL NOT NULL,
 	PRIMARY KEY (a, b)
 );
+CREATE TABLE IF NOT EXISTS intrusions (
+	session_id TEXT PRIMARY KEY,
+	tool_calls_since INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS tag_fan_cache (
 	bank TEXT NOT NULL,
 	tag TEXT NOT NULL,
@@ -56,6 +60,7 @@ export class LocalState {
 		mkdirSync(directory, { recursive: true });
 		this.clock = clock;
 		this.database = new Database(join(directory, "state.sqlite"), { create: true });
+		this.database.exec("PRAGMA busy_timeout = 2000");
 		this.database.exec("PRAGMA journal_mode = WAL");
 		this.database.exec(schema);
 	}

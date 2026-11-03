@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { startFakeServer } from "./fake.js";
-import { HindsightStore } from "./hindsight.js";
+import { HindsightStore, StoreError } from "./hindsight.js";
 import type { MemoryRecord } from "./types.js";
 
 const bank = "org-acme";
@@ -15,6 +15,8 @@ beforeAll(async () => {
 		{ content: "deploy the api with docker compose", tags: ["project:api", "stack:docker"] },
 		{ content: "api tests run with bun test", tags: ["project:api", "stack:bun"], context: "ci" },
 		{ content: "the web app uses react", tags: ["project:web"], metadata: { source: "note" } },
+		{ content: "deploy api with bun", tags: ["project:api"] },
+		{ content: "api notes with bun", tags: [] },
 	]);
 	recalled = await store.recall(bank, {
 		query: "run api tests with bun",
@@ -25,18 +27,46 @@ beforeAll(async () => {
 
 afterAll(() => server.stop());
 
-test("recall with tagsMatch any orders by keyword overlap, ties by insertion order", async () => {
+test("recall orders by keyword overlap, ties by insertion order", async () => {
 	expect(recalled.map((record) => record.text)).toEqual([
 		"api tests run with bun test",
+		"deploy api with bun",
+		"api notes with bun",
 		"deploy the api with docker compose",
 		"the web app uses react",
 	]);
-	expect(recalled.map((record) => record.score?.final)).toEqual([5, 2, 0]);
+	expect(recalled.map((record) => record.score?.final)).toEqual([5, 3, 3, 2, 0]);
 	const top = await store.recall(bank, { query: "run api tests with bun", topK: 1 });
 	expect(top).toHaveLength(1);
 });
 
-test("recall with tagsMatch all_strict keeps only memories holding every tag", async () => {
+test("tagsMatch any includes untagged memories, all_strict excludes them", async () => {
+	const lenient = await store.recall(bank, {
+		query: "api",
+		tags: ["project:api"],
+		tagsMatch: "any",
+		topK: 10,
+	});
+	expect(lenient.map((record) => record.text).sort()).toEqual([
+		"api notes with bun",
+		"api tests run with bun test",
+		"deploy api with bun",
+		"deploy the api with docker compose",
+	]);
+	const strict = await store.recall(bank, {
+		query: "api",
+		tags: ["project:api"],
+		tagsMatch: "all_strict",
+		topK: 10,
+	});
+	expect(strict.map((record) => record.text).sort()).toEqual([
+		"api tests run with bun test",
+		"deploy api with bun",
+		"deploy the api with docker compose",
+	]);
+});
+
+test("all_strict keeps only memories holding every tag", async () => {
 	const found = await store.recall(bank, {
 		query: "api",
 		tags: ["project:api", "stack:bun"],
@@ -61,18 +91,19 @@ test("list pages through memories and filters by tag", async () => {
 		"api tests run with bun test",
 		"the web app uses react",
 	]);
-	const tagged = await store.list(bank, {
-		tags: ["stack:docker"],
-		tagsMatch: "any_strict",
-		limit: 10,
-		offset: 0,
-	});
-	expect(tagged).toHaveLength(1);
+	const tagged = await store.list(bank, { tags: ["stack:docker"], limit: 10, offset: 0 });
+	expect(tagged.map((record) => record.text)).toEqual(["deploy the api with docker compose"]);
 });
 
 test("listTags counts tags per bank", async () => {
 	const tags = await store.listTags(bank);
-	expect(tags).toContainEqual({ tag: "project:api", count: 2 });
+	expect(tags).toContainEqual({ tag: "project:api", count: 3 });
 	expect(tags).toContainEqual({ tag: "project:web", count: 1 });
 	expect(await store.listTags("generic")).toEqual([]);
+});
+
+test("a wrong base URL is an error for list and listTags, not an empty store", async () => {
+	const wrong = new HindsightStore({ baseUrl: `${server.url}/prefix` });
+	await expect(wrong.list(bank, { limit: 1, offset: 0 })).rejects.toBeInstanceOf(StoreError);
+	await expect(wrong.listTags(bank)).rejects.toBeInstanceOf(StoreError);
 });

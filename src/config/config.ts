@@ -26,6 +26,7 @@ export interface Config {
 	organizations: Record<string, string>;
 	replayDir: string;
 	stateDir: string;
+	storeTimeoutMs: number;
 	activation: ActivationParameters;
 }
 
@@ -42,6 +43,7 @@ const numberKeys = [
 	"intrusionThreshold",
 	"intrusionCooldown",
 	"dormancyFloor",
+	"storeTimeoutMs",
 ] as const;
 
 function xdgDirectory(env: LoadConfigOptions["env"], variable: string, fallback: string): string {
@@ -69,11 +71,23 @@ function readFileConfig(configDir: string): Record<string, unknown> {
 	}
 }
 
+function isHttpUrl(value: string): boolean {
+	try {
+		const { protocol } = new URL(value);
+		return protocol === "http:" || protocol === "https:";
+	} catch {
+		return false;
+	}
+}
+
 export function loadConfig(options: LoadConfigOptions): Config {
 	const { env } = options;
 	const storeUrl = env.DMN_STORE_URL;
 	if (!storeUrl) {
 		throw new ConfigError("DMN_STORE_URL is not set; point it at the memory store (or `fake:`)");
+	}
+	if (storeUrl !== "fake:" && !isHttpUrl(storeUrl)) {
+		throw new ConfigError("DMN_STORE_URL must be an http(s) URL or fake:");
 	}
 	const configDir = options.configDir ?? xdgDirectory(env, "XDG_CONFIG_HOME", ".config");
 	const file = readFileConfig(configDir);
@@ -90,6 +104,7 @@ export function loadConfig(options: LoadConfigOptions): Config {
 		organizations: {},
 		replayDir: join(xdgDirectory(env, "XDG_DATA_HOME", ".local/share"), "replay"),
 		stateDir: xdgDirectory(env, "XDG_STATE_HOME", ".local/state"),
+		storeTimeoutMs: 2000,
 		activation: { ...defaultActivationParameters },
 	};
 
@@ -126,15 +141,27 @@ export function loadConfig(options: LoadConfigOptions): Config {
 		if (typeof activation !== "object" || activation === null || Array.isArray(activation)) {
 			throw new ConfigError('config.json: "activation" must be an object');
 		}
-		config.activation = { ...config.activation, ...(activation as Partial<ActivationParameters>) };
+		for (const [key, value] of Object.entries(activation)) {
+			if (!(key in defaultActivationParameters)) {
+				throw new ConfigError(`config.json: unknown key "activation.${key}"`);
+			}
+			if (typeof value !== "number" || !Number.isFinite(value)) {
+				throw new ConfigError(`config.json: "activation.${key}" must be a number`);
+			}
+			config.activation[key as keyof ActivationParameters] = value;
+		}
 	}
 	return config;
 }
 
-/** `fake:` selects the in-process store; anything else is a Hindsight base URL. */
+/**
+ * `fake:` selects a fresh in-memory store that lives and dies with the process: meant for
+ * replay and tests only, since separate hook processes would never see each other's memories.
+ * Anything else is a Hindsight base URL.
+ */
 export function createStore(config: Config): MemoryStore {
 	if (config.storeUrl === "fake:") return new FakeStore();
-	return new HindsightStore({ baseUrl: config.storeUrl });
+	return new HindsightStore({ baseUrl: config.storeUrl, timeoutMs: config.storeTimeoutMs });
 }
 
 /** Opens the local state. Loaded lazily so `bun:sqlite` is only needed by commands that use it. */
