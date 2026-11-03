@@ -21,6 +21,12 @@ for (const { fixture, role, reason } of rows) {
 	test(`${fixture} is ${reason ? `dropped as ${reason}` : "retained"}`, () => {
 		const verdict = shouldRetain({ role, text: read(fixture) });
 		expect(verdict).toEqual(reason ? { retain: false, reason } : { retain: true });
+		if (fixture === "credential-assignment.txt") {
+			// Every line must be caught on its own, so no pattern hides another's gap.
+			for (const line of read(fixture).split("\n").slice(1).filter(Boolean)) {
+				expect(shouldRetain({ role, text: line })).toEqual({ retain: false, reason });
+			}
+		}
 	});
 }
 
@@ -44,7 +50,7 @@ test("each secret form is dropped on its own line", () => {
 		"clone https://user:pat@github.com/acme/widgets.git",
 		"DATABASE_URL=postgres://app:s3cr3t@db.example.test:5432/app",
 		`stripe ${["sk_", "live_", "F".repeat(24)].join("")}`,
-		"Authorization: Basic dXNlcjpwYXNzd29yZDEyMzQ1Ng==",
+		"authorization: basic dXNlcjpwYXNzd29yZDEyMzQ1Ng==",
 		`jwt ${["eyJ", "F".repeat(12), ".eyJ", "F".repeat(12), ".", "F".repeat(12)].join("")}`,
 	];
 	for (const text of lines) {

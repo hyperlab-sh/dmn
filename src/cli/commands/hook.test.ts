@@ -171,4 +171,11 @@ test("a memory cited at stop ranks above the others on the next prompt", async (
 		ids["The sync worker logs every retry delay."],
 	]);
 	expect(after[0]).toBe(target);
+	// Use stamps follow DMN_NOW, the same clock recall ranks with.
+	const state = new LocalState({ directory: join(scratch, "state", "dmn") });
+	try {
+		expect(state.uses(target).lastUsedAt).toBe("2100-01-01T00:00:00.000Z");
+	} finally {
+		state.close();
+	}
 });
