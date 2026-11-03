@@ -161,6 +161,4 @@ test("replay --judge fake writes the third order, already judged, and score prin
 	const scored = dmn(["replay", "score", directory]).stdout.toString();
 	expect(scored.split("\n").filter((line) => line.includes(" p@3 = "))).toHaveLength(3);
 	expect(scored).toContain("activation+judge p@3 = ");
-	// The run without --judge, scored the same way, prints the two old rows.
-	expect(dmn(["replay", "score", copyOfBase("old")]).stdout.toString()).not.toContain("+judge");
 });

@@ -303,17 +303,13 @@ test("a judge gates the prompt injection and the intrusive thought by their own 
 	).not.toBeNull();
 });
 
-test("a judge that fails warns and leaves the prompt injection unfiltered and the thought lost", async () => {
+test("a judge that fails costs the intrusive thought and warns", async () => {
 	const warnings: string[] = [];
-	const failing = {
-		...deps,
+	const output = await handleHookEvent(postTool("judge-down"), {
+		...eager(),
 		judge: new FakeJudge({ failWith: new Error("judge down") }),
-		onWarning: (message: string) => warnings.push(message),
-	};
-	const output = await handleHookEvent(
-		event({ hook_event_name: "UserPromptSubmit", prompt: "retry" }),
-		failing,
-	);
-	expect(output?.hookSpecificOutput.additionalContext).toContain("retry with jitter");
-	expect(warnings).toEqual(["dmn: judge: judge down"]);
+		onWarning: (message) => warnings.push(message),
+	});
+	expect(output).toBeNull();
+	expect(warnings.join("\n")).toContain("judge down");
 });

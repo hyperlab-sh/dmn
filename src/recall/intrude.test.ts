@@ -139,6 +139,24 @@ test("with a judge the one chosen memory is judged and surfaces only at or above
 	expect(await run("low", low)).toBeNull();
 	expect({ calls: low.calls, judged: low.judged }).toEqual({ calls: 1, judged: 1 });
 
+	// A memory the judge leaves unanswered is not shown either, and is reported.
+	const unansweredErrors: unknown[] = [];
+	expect(
+		await intrude({
+			store,
+			state,
+			config,
+			cue,
+			sessionId: "unanswered",
+			toolName: "Read",
+			toolInput: { file_path: "/repo/retry.ts" },
+			random: () => 0.5,
+			judge: new FakeJudge({ skip: [id] }),
+			onJudgeError: (error) => unansweredErrors.push(error),
+		}),
+	).toBeNull();
+	expect(unansweredErrors).toHaveLength(1);
+
 	// A judge that fails costs the thought, and is reported.
 	const errors: unknown[] = [];
 	const failing = new FakeJudge({ failWith: new Error("down") });

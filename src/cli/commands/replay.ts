@@ -196,7 +196,7 @@ async function replayCommand(argv: string[]): Promise<number> {
 			random,
 			now,
 			manifests,
-			...(judge && { judge, judgeThreshold: options.threshold ?? config.judge.threshold }),
+			...(judge && { gate: { judge, threshold: options.threshold ?? config.judge.threshold } }),
 		});
 		writeReport(result, directory);
 		for (const warning of result.warnings) process.stderr.write(`dmn: ${warning}\n`);

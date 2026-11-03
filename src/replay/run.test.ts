@@ -187,8 +187,7 @@ test("with a judge every entry gains the gated third list, written with the judg
 		random: counter(),
 		now,
 		manifests: readManifests(fixture("manifests")),
-		judge,
-		judgeThreshold: 0.5,
+		gate: { judge, threshold: 0.5 },
 	});
 	// One batch per prompt; the activation list itself is the one a run without a judge makes.
 	expect(judge.calls).toBe(prompts.length);
@@ -223,4 +222,28 @@ test("a run without a judge has no third list", async () => {
 	expect(readFileSync(join(directory, "judgements.json"), "utf8")).not.toContain(
 		"activation+judge",
 	);
+});
+
+test("the gate drops a candidate below the threshold and refills the top from the next one", async () => {
+	const run = (top: number, gate?: { judge: FakeJudge; threshold: number }) =>
+		runReplay({
+			prompts,
+			store,
+			state,
+			config,
+			top,
+			random: counter(),
+			now,
+			manifests: readManifests(fixture("manifests")),
+			...(gate && { gate }),
+		});
+	const [a, b, c] = ((await run(3)).entries[0]?.activation ?? []).map((memory) => memory.id) as [
+		string,
+		string,
+		string,
+	];
+	const judge = new FakeJudge({ probabilities: { [a]: 0.1, [b]: 0.9, [c]: 0.9 } });
+	const [entry] = (await run(2, { judge, threshold: 0.5 })).entries;
+	expect(entry?.activation.map((memory) => memory.id)).toEqual([a, b]);
+	expect(entry?.judged?.map((memory) => memory.id)).toEqual([b, c]);
 });

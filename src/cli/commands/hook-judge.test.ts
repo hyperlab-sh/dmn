@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startFakeServer } from "../../store/fake.js";
 import { bankFor, HindsightStore } from "../../store/hindsight.js";
+import { runHook } from "./hook.js";
 
 const root = new URL("../../..", import.meta.url).pathname;
 const fixtures = join(root, "fixtures/hooks");
@@ -112,4 +113,16 @@ test("provider laya injects only what the judge marks useful; none sends no requ
 	expect(unreachable.lines).toHaveLength(2);
 	expect(unreachable.stderr).toContain("dmn: judge: ");
 	expect(unreachable.stderr).not.toContain("stub-key");
+});
+
+test("provider laya without LAYA_API_KEY is a config error: exit 2 for user-prompt, 1 for post-tool", async () => {
+	const configHome = join(scratch, "nokey");
+	mkdirSync(join(configHome, "dmn"), { recursive: true });
+	writeFileSync(
+		join(configHome, "dmn", "config.json"),
+		JSON.stringify({ judge: { provider: "laya" } }),
+	);
+	const env = { HOME: scratch, DMN_STORE_URL: store.url, XDG_CONFIG_HOME: configHome };
+	expect(await runHook("user-prompt", env)).toBe(2);
+	expect(await runHook("post-tool", env)).toBe(1);
 });

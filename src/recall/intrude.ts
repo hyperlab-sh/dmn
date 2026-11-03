@@ -105,7 +105,7 @@ export interface IntrudeInput {
 	/**
 	 * Judges the one memory the decision chose against `config.judge.intrusionThreshold`; nothing
 	 * surfaces below it. A failing judge, or one that leaves the memory unanswered, is reported to
-	 * `onJudgeError`: a failure surfaces nothing, an unanswered memory is kept.
+	 * `onJudgeError` and surfaces nothing.
 	 */
 	judge?: Judge | undefined;
 	onJudgeError?: (error: unknown) => void;
@@ -152,13 +152,14 @@ export async function intrude({
 	});
 	const chosen = decideIntrusion({ ranked, config, random: draw, toolCallsSinceLast });
 	if (!chosen || !judge) return chosen;
-	// Text holding a secret never leaves the machine; the memory is then unjudged and kept.
-	if (containsSecret(target.query) || containsSecret(chosen.text)) return chosen;
+	// An optional thought that cannot be judged is not shown. Text holding a secret never leaves
+	// the machine, so it cannot be judged.
+	if (containsSecret(target.query) || containsSecret(chosen.text)) return null;
 	try {
 		const [answer] = await judge.judge(target.query, [{ id: chosen.id, text: chosen.text }]);
 		if (!answer) {
 			onJudgeError?.(new Error("the judge left the chosen memory unanswered"));
-			return chosen;
+			return null;
 		}
 		return answer.useful >= config.judge.intrusionThreshold ? chosen : null;
 	} catch (error) {

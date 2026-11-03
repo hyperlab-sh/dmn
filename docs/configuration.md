@@ -56,13 +56,13 @@ Located at `$XDG_CONFIG_HOME/dmn/config.json`. Every key is optional.
 | `threshold`          | `0.5`                     | Read by prompt-time recall (`SessionStart`, `UserPromptSubmit`): a candidate with P(useful) below it is not injected. Also by `replay judge` (marks `useful`) and `replay --judge` (the third order) (0..1). |
 | `intrusionThreshold` | `0.7`                     | Read by the intrusive path: the one memory chosen to surface is judged and dropped below this (0..1). Not the activation `intrusionThreshold` above.                                                         |
 | `baseUrl`            | `https://api.laya.studio` | Another server speaking the same API (for example a local model).                                                                                                                                            |
-| `timeoutMs`          | `30000`                   | Per-call limit; a 64-item batch is slow, unlike a hook.                                                                                                                                                      |
+| `timeoutMs`          | `30000`                   | Per-call limit; a 64-item batch is slow, unlike a hook. In hooks it is capped at the hook's own store limit (`storeTimeoutMs`, or `intrusionTimeoutMs` after a tool call).                                   |
 
 With `provider: "none"` (the default) no judge exists and nothing is sent anywhere. With `laya`,
 prompt-time recall makes one batch call per prompt and the intrusive path one single-memory call
 per surfaced thought. A candidate the judge did not answer is kept. If the judge fails (network,
 timeout, balance) the hook still succeeds: the injection is the unfiltered one, a warning goes to
-stderr, and an intrusive thought is dropped. A prompt or memory that holds a secret is never sent.
+stderr, and an intrusive thought is dropped. An intrusive thought the judge leaves unanswered, or that holds a secret (so is never sent), is dropped too. A secret-bearing prompt or memory is never sent; in prompt-time recall it is kept unjudged.
 
 See [Judge with Laya](replay.md#judge-with-laya).
 
