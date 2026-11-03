@@ -128,14 +128,24 @@ test("provider laya without LAYA_API_KEY is a config error: exit 2 for user-prom
 	expect(await runHook("post-tool", env)).toBe(1);
 });
 
-test("hookJudge builds no judge for Stop, or for post-tool with intrusions off, and throws without a key", () => {
+test("hookJudge: Stop builds a judge with a key, warns without one, builds none for provider none", () => {
 	const config = loadConfig({
 		env: { DMN_STORE_URL: "fake:", HOME: scratch },
 		configDir: join(scratch, "nokey", "dmn"),
 	});
 	expect(config.judge.provider).toBe("laya");
-	expect(hookJudge("Stop", config, {})).toBeUndefined();
+	// Stop classifies the retained turns' kinds: with a key the judge exists.
+	expect(hookJudge("Stop", config, { LAYA_API_KEY: "k" })).toBeDefined();
+	// Without a key Stop keeps its retention: one warning, no judge, no throw.
+	const warnings: string[] = [];
+	expect(hookJudge("Stop", config, {}, (message) => warnings.push(message))).toBeUndefined();
+	expect(warnings).toEqual([expect.stringContaining("LAYA_API_KEY")]);
+	// Provider none builds no judge, and intrusions off builds none for post-tool.
+	expect(
+		hookJudge("Stop", { ...config, judge: { ...config.judge, provider: "none" } }, {}),
+	).toBeUndefined();
 	expect(hookJudge("PostToolUse", { ...config, intrusionThreshold: null }, {})).toBeUndefined();
+	// The prompt events keep C-3's contract for a missing key.
 	expect(() => hookJudge("UserPromptSubmit", config, {})).toThrow(ConfigError);
 	expect(() => hookJudge("PostToolUse", config, {})).toThrow(ConfigError);
 	expect(hookJudge("UserPromptSubmit", config, { LAYA_API_KEY: "k" })).toBeDefined();

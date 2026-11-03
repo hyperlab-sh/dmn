@@ -313,3 +313,37 @@ test("a judge that fails costs the intrusive thought and warns", async () => {
 	expect(output).toBeNull();
 	expect(warnings.join("\n")).toContain("judge down");
 });
+
+test("stop tags the retained turns with the judge's kinds, and a judge that fails only warns", async () => {
+	const transcript_path = cite("kinds.jsonl", "Retries back off with jitter, capped at five.");
+	const userText = "What did we say?";
+
+	const kinded = new FakeStore();
+	await handleHookEvent(event({ hook_event_name: "Stop", transcript_path }), {
+		...deps,
+		store: kinded,
+		judge: new FakeJudge({ kinds: { [userText]: { kind: "learning" } } }),
+	});
+	expect(
+		(await kinded.list("generic", { limit: 10, offset: 0 })).map((item) => [
+			item.text,
+			item.tags.at(-1),
+		]),
+	).toEqual([
+		[userText, "kind:learning"],
+		["Retries back off with jitter, capped at five.", "kind:turn"],
+	]);
+
+	const warnings: string[] = [];
+	const failing = new FakeStore();
+	await handleHookEvent(event({ hook_event_name: "Stop", transcript_path }), {
+		...deps,
+		store: failing,
+		judge: new FakeJudge({ failWith: new Error("judge down") }),
+		onWarning: (message) => warnings.push(message),
+	});
+	expect(
+		(await failing.list("generic", { limit: 10, offset: 0 })).map((item) => item.tags.at(-1)),
+	).toEqual(["kind:turn", "kind:turn"]);
+	expect(warnings).toEqual(["dmn: judge: judge down"]);
+});

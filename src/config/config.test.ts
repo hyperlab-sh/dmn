@@ -58,7 +58,13 @@ test("returns the documented defaults when config.json is absent", () => {
 		retainTimeoutMs: 60_000,
 		fanCacheSeconds: 300,
 		activation: { ...defaultActivationParameters },
-		judge: { provider: "none", threshold: 0.5, intrusionThreshold: 0.7, timeoutMs: 30_000 },
+		judge: {
+			provider: "none",
+			threshold: 0.5,
+			intrusionThreshold: 0.7,
+			kindThreshold: 0.5,
+			timeoutMs: 30_000,
+		},
 	});
 });
 
@@ -122,11 +128,15 @@ test("judge block merges over its defaults and rejects bad values", () => {
 		provider: "laya",
 		threshold: 0.3,
 		intrusionThreshold: 0.7,
+		kindThreshold: 0.5,
 		timeoutMs: 30_000,
 		baseUrl: "http://localhost:9000",
 	});
+	expect(load({ kindThreshold: 0.9 }).kindThreshold).toBe(0.9);
 	expect(() => load({ provider: "openai" })).toThrow(/judge\.provider/);
 	expect(() => load({ threshold: 2 })).toThrow(/judge\.threshold/);
+	expect(() => load({ kindThreshold: 2 })).toThrow(/judge\.kindThreshold/);
+	expect(() => load({ kindThreshold: -0.1 })).toThrow(/judge\.kindThreshold/);
 	expect(() => load({ apiKey: "x" })).toThrow(/judge\.apiKey/);
 });
 

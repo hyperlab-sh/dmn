@@ -12,7 +12,7 @@ import {
 	handleHookEvent,
 	parseHookEvent,
 } from "../../hooks/claude-code.js";
-import type { Judge } from "../../judge/types.js";
+import type { Judge, KindJudge } from "../../judge/types.js";
 
 const eventBySubcommand: Record<string, HookEventName> = {
 	"session-start": "SessionStart",
@@ -28,24 +28,35 @@ async function readStdin(): Promise<string> {
 }
 
 /**
- * The judge a hook uses, or undefined when it uses none. Stop never judges, so a missing key cannot
- * cost a turn's retention; nor does PostToolUse with intrusive thoughts off. The judge's timeout is
- * capped at the hook's own limit (a tool call's thought has `intrusionTimeoutMs`). Throws
- * ConfigError for provider "laya" without `LAYA_API_KEY`.
+ * The judge a hook uses, or undefined when it uses none: Stop classifies the kinds of the turns
+ * it retains, user-prompt and session-start gate injections, post-tool gates the surfaced
+ * thought (none when intrusive thoughts are off). A ConfigError building it (provider `laya`
+ * without `LAYA_API_KEY`) is C-3's exit for the prompt events, but Stop swallows it as a
+ * warning — a missing key must not cost a turn its retention. The judge's timeout is capped at
+ * the hook's own limit (a tool call's thought has `intrusionTimeoutMs`, the rest `storeTimeoutMs`).
  */
 export function hookJudge(
 	event: HookEventName,
 	config: ReturnType<typeof loadConfig>,
 	env: Record<string, string | undefined>,
-): Judge | undefined {
-	if (event === "Stop" || (event === "PostToolUse" && config.intrusionThreshold === null)) {
+	onWarning?: (message: string) => void,
+): (Judge & KindJudge) | undefined {
+	if (event === "PostToolUse" && config.intrusionThreshold === null) {
 		return undefined;
 	}
 	const limit = event === "PostToolUse" ? config.intrusionTimeoutMs : config.storeTimeoutMs;
-	return createJudge(
-		{ ...config, judge: { ...config.judge, timeoutMs: Math.min(config.judge.timeoutMs, limit) } },
-		env,
-	);
+	try {
+		return createJudge(
+			{ ...config, judge: { ...config.judge, timeoutMs: Math.min(config.judge.timeoutMs, limit) } },
+			env,
+		);
+	} catch (error) {
+		if (event === "Stop" && error instanceof ConfigError) {
+			onWarning?.(`dmn: ${error.message}`);
+			return undefined;
+		}
+		throw error;
+	}
 }
 
 /** Runs `dmn hook <subcommand>`; returns the exit code. Output is the hook JSON, or nothing. */
@@ -61,11 +72,12 @@ export async function runHook(
 		return 1;
 	}
 	let config: ReturnType<typeof loadConfig>;
-	let judge: Judge | undefined;
+	let judge: (Judge & KindJudge) | undefined;
 	try {
 		config = loadConfig({ env });
-		// A missing key is a config error (exit 2 for user-prompt).
-		judge = hookJudge(expected, config, env);
+		// Stop turns a judge ConfigError into a warning inside hookJudge; the prompt events keep
+		// C-3's exit 2 for a missing key.
+		judge = hookJudge(expected, config, env, (message) => process.stderr.write(`${message}\n`));
 	} catch (error) {
 		if (error instanceof ConfigError) {
 			process.stderr.write(`dmn: ${error.message}\n`);
