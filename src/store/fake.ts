@@ -1,4 +1,4 @@
-import { StoreError } from "./hindsight.js";
+import { StoreError } from "./errors.js";
 import type {
 	ConsolidationResult,
 	ListQuery,
@@ -170,7 +170,12 @@ export function startFakeServer(options?: {
 		port: 0,
 		hostname: "127.0.0.1",
 		async fetch(request) {
-			const url = new URL(request.url);
+			let url: URL;
+			try {
+				url = new URL(request.url);
+			} catch {
+				return new Response("bad request", { status: 400 });
+			}
 			if (url.pathname === "/v1/systemone/batch") {
 				if (!options?.judgeBatch) return new Response("not found", { status: 404 });
 				const body = (await request.json()) as {

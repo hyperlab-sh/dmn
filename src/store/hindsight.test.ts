@@ -24,6 +24,10 @@ beforeAll(() => {
 			if (pathname.endsWith("/banks/quiet/consolidate")) {
 				return Response.json({ detail: "Bank 'quiet' not found" }, { status: 404 });
 			}
+			if (pathname.endsWith("/banks/late/consolidate")) {
+				// An async answer that has not deduplicated yet carries no count at all.
+				return Response.json({ operation_id: "op-8" });
+			}
 			return Response.json({ id: "x", text: "no timestamp" });
 		},
 	});
@@ -58,6 +62,11 @@ test("a record without any timestamp is a StoreError, not an empty createdAt", a
 test("consolidate posts to the bank's consolidate path with no body and maps the response", async () => {
 	const store = new HindsightStore({ baseUrl });
 	await expect(store.consolidate("b")).resolves.toEqual({ operationId: "op-7", deduplicated: 3 });
+	// A count the answer does not carry yet maps to zero, the pinned fallback.
+	await expect(store.consolidate("late")).resolves.toEqual({
+		operationId: "op-8",
+		deduplicated: 0,
+	});
 	// A bank the store does not know is the skip signal, not some other empty answer.
 	const error = await store.consolidate("quiet").catch((caught: unknown) => caught);
 	expect(error).toBeInstanceOf(StoreError);

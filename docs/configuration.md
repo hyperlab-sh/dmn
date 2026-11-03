@@ -201,6 +201,10 @@ dmn rest --apply          # also promote the reported learnings
   instead of duplicating), marks the original dormant and remembers the promotion so it is never
   proposed again. Without `--apply` nothing is written to the store or to dmn's state. Nothing
   is ever deleted: the original stays, dormant.
+- **Failures**: a bank whose pass fails is reported (`failed <bank>: <message>`) and the run
+  continues with the other banks; a promotion the store refused is warned about on stderr and
+  the original is left as it was, so the next run can retry it. Either makes the exit 1, so a
+  scheduled run can tell.
 
 Which projects used a memory comes from its use records: each citation is stamped with the
 project of the session that cited it (rows written before the column existed keep an empty

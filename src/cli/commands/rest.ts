@@ -35,7 +35,13 @@ export async function runRestCommand(
 				now,
 				onWarning: (message) => process.stderr.write(`${message}\n`),
 			});
+			let failed = false;
 			for (const entry of report.banks) {
+				if (entry.error !== undefined) {
+					process.stdout.write(`failed ${entry.bank}: ${entry.error}\n`);
+					failed = true;
+					continue;
+				}
 				if (entry.consolidation === null) {
 					process.stdout.write(`skipped ${entry.bank}: not found\n`);
 					continue;
@@ -57,8 +63,10 @@ export async function runRestCommand(
 				} else if (values.apply) {
 					for (const id of entry.applied) process.stdout.write(`promoted ${id}\n`);
 				}
+				// A refused promotion was warned about on stderr; the exit must say it too.
+				if (entry.failed.length > 0) failed = true;
 			}
-			return 0;
+			return failed ? 1 : 0;
 		} finally {
 			state.close();
 		}

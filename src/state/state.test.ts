@@ -106,6 +106,29 @@ test("recordPromotion writes one row per memory, stamped by the clock; isPromote
 	}
 });
 
+test("markPromoted writes dormancy and the promotion as one write at one timestamp", () => {
+	now = at(0);
+	state.markPromoted("m5", "generic");
+	expect(state.isDormant("m5")).toBe(true);
+	expect(state.isPromoted("m5")).toBe(true);
+	const reader = new Database(join(directory, "nested", "state.sqlite"), { readonly: true });
+	try {
+		const dormantAt = reader
+			.query<{ dormant_at: string }, [string]>("SELECT dormant_at FROM dormant WHERE memory_id = ?")
+			.get("m5")?.dormant_at;
+		const promotion = reader
+			.query<{ scope: string; at: string }, [string]>(
+				"SELECT scope, at FROM promotions WHERE memory_id = ?",
+			)
+			.get("m5");
+		// Both rows carry the same stamp: the two writes are one.
+		expect(dormantAt).toBe("2026-01-01T00:00:00.000Z");
+		expect(promotion).toEqual({ scope: "generic", at: "2026-01-01T00:00:00.000Z" });
+	} finally {
+		reader.close();
+	}
+});
+
 test("dormancy round trip: set, check, revive", () => {
 	now = at(0);
 	expect(state.isDormant("m3")).toBe(false);
