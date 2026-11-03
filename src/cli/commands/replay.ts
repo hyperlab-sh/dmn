@@ -5,7 +5,7 @@ import { ConfigError, createStore, loadConfig } from "../../config/config.js";
 import type { Manifest } from "../../cue/stack.js";
 import { readManifests } from "../../replay/manifests.js";
 import { RunExistsError, readRunTop, writeReport } from "../../replay/report.js";
-import { readSeedMemories, runReplay, seedFakeStore } from "../../replay/run.js";
+import { readSeedMemories, runName, runReplay, seedFakeStore } from "../../replay/run.js";
 import { readJudgements, score, writeSummary } from "../../replay/score.js";
 import { promptsFrom } from "../../replay/transcript.js";
 import { LocalState } from "../../state/state.js";
@@ -118,6 +118,10 @@ async function replayCommand(argv: string[]): Promise<number> {
 	const manifests: Manifest[] = options.manifests ? readManifests(options.manifests) : [];
 	const prompts = options.files.flatMap((file) => promptsFrom(file));
 
+	// Known before the replay starts: refuse early rather than after every store query.
+	const directory = join(options.out ?? config.replayDir, runName(now));
+	if (existsSync(directory)) throw new RunExistsError(directory);
+
 	// A scratch state: replay must not touch the real use counts.
 	const scratch = mkdtempSync(join(tmpdir(), "dmn-replay-"));
 	const state = new LocalState({ directory: scratch, clock: () => now });
@@ -132,7 +136,6 @@ async function replayCommand(argv: string[]): Promise<number> {
 			now,
 			manifests,
 		});
-		const directory = join(options.out ?? config.replayDir, result.run);
 		writeReport(result, directory);
 		for (const warning of result.warnings) process.stderr.write(`dmn: ${warning}\n`);
 		console.log(`wrote ${join(directory, "report.md")} and ${join(directory, "judgements.json")}`);

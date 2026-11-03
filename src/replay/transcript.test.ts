@@ -37,7 +37,7 @@ test("session B: text blocks, meta lines skipped, skill from a Skill tool call",
 	expect(prompts[1]?.activeSkill).toBe("plan");
 	expect(prompts[1]?.recentTools).toEqual(["Skill", "Read"]);
 	expect(prompts[2]?.recentTools).toEqual(["Edit", "Edit"]);
-	// Compact summary, sidechain, shell and interrupt lines left prompt 3's tools intact.
+	// Compact summary, sidechain (tools and cwd), shell and interrupt lines left prompt 3 intact.
 	expect(prompts[3]?.activeSkill).toBe("unit");
 	expect(prompts[3]?.recentTools).toEqual([]);
 	expect(prompts[2]?.cwd).toBe("/home/dev/acme/widgets/services");

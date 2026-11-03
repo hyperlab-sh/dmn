@@ -19,9 +19,12 @@ dmn replay ~/.claude/projects/<project>/<session>.jsonl [more.jsonl ...] [--top 
 | `--out <dir>`         | Where run directories go. Default: the `replayDir` config key.                                                                                                                           |
 | `--top <n>`           | List length and the `n` of precision@n. Default 5.                                                                                                                                       |
 
-Each run writes `<out>/run-<timestamp>/report.md` and `judgements.json`. A run directory that already exists is never overwritten (exit 2): your judgements are in it, so with a fixed `DMN_NOW` pass another `--out` or remove the directory. The report records the run's `top:`, and `replay score` uses it. The harness only reads
-the store; the one `retain` is the seeding of the fake store. Use counts live in a scratch state
-that is deleted afterwards.
+Each run writes `<out>/run-<timestamp>/report.md` and `judgements.json`. A run directory that
+already exists is never overwritten (exit 2, checked before the replay starts): your judgements
+are in it, so with a fixed `DMN_NOW` pass another `--out` or remove the directory. The report
+records the run's `top:`, and `replay score` uses it. The harness only reads the store; the one
+`retain` is the seeding of the fake store. Use counts live in a scratch state that is deleted
+afterwards.
 
 For reproducible output set `DMN_SEED` (any string, seeds the activation noise) and `DMN_NOW`
 (an ISO date, the clock). Two runs with the same inputs are byte-identical.
@@ -48,11 +51,11 @@ activation p@5 = 0.60
 judged 20/20
 ```
 
-Precision@5 per order (@`top` of the run, which `score` reads from the report; `--top` overrides) is the useful memories among a prompt's first five shown, over five,
-averaged over the prompts. A list shorter than five is still divided by five. Entries left at
-`null` count as not useful; `judged` says how many you filled in. The command rewrites the
-`## Summary` section of `report.md` with both numbers side by side (before scoring it says
-`unscored`).
+Precision@n, where n is the run's `top` (recorded in the report; `--top` overrides): useful
+memories among a prompt's first n shown, over n, averaged over the prompts. A shorter list is
+still divided by n. Entries left at `null` count as not useful; `judged` says how many you
+filled in. The command rewrites the `## Summary` section of `report.md` with both numbers side
+by side (before scoring it says `unscored`).
 
 Read the number as a comparison on your own prompts, not an absolute: a gap of one memory per
 prompt on a few dozen prompts is signal; a gap on five prompts is noise, and the activation

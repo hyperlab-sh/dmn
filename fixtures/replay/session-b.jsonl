@@ -8,5 +8,6 @@
 {"type":"user","cwd":"/home/dev/acme/widgets/services","timestamp":"2026-06-02T10:01:52.000Z","message":{"role":"user","content":"<bash-input>ls</bash-input>"}}
 {"type":"user","cwd":"/home/dev/acme/widgets/services","timestamp":"2026-06-02T10:01:53.000Z","message":{"role":"user","content":"<bash-stdout>a.ts</bash-stdout><bash-stderr></bash-stderr>"}}
 {"type":"user","cwd":"/home/dev/acme/widgets/services","timestamp":"2026-06-02T10:01:54.000Z","message":{"role":"user","content":[{"type": "text", "text": "[Request interrupted by user]"}]}}
+{"type":"assistant","isSidechain":true,"cwd":"/home/dev/acme/widgets/other","timestamp":"2026-06-02T10:01:55.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"u9","name":"Grep","input":{"pattern":"retry"}}]}}
 {"type":"user","cwd":"/home/dev/acme/widgets/services","timestamp":"2026-06-02T10:02:00.000Z","message":{"role":"user","content":"Cap the retry delay in the module"}}
 {"type":"user","cwd":"/home/dev/acme/widgets/services","timestamp":"2026-06-02T10:03:00.000Z","message":{"role":"user","content":"<command-message>unit</command-message><command-name>/unit</command-name><command-args>fix the retry parser</command-args>"}}

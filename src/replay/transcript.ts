@@ -87,6 +87,8 @@ export function promptsFrom(path: string): ReplayPrompt[] {
 	let activeSkill: string | undefined;
 	let cwd = "";
 	for (const line of parseLines(path)) {
+		// A subagent's thread: its tools and cwd say nothing about the user's next prompt.
+		if (line.isSidechain) continue;
 		if (typeof line.cwd === "string") cwd = line.cwd;
 		const content = line.message?.content;
 		if (line.type === "assistant") {
@@ -96,7 +98,7 @@ export function promptsFrom(path: string): ReplayPrompt[] {
 			continue;
 		}
 		if (line.type !== "user" || line.isMeta) continue;
-		if (line.isCompactSummary || line.isSidechain) continue;
+		if (line.isCompactSummary) continue;
 		let text = typedText(content);
 		const command = commandPattern.exec(text);
 		if (command?.[1]) {
