@@ -30,7 +30,13 @@ describe.skipIf(!storeUrl)("Hindsight contract (needs DMN_STORE_URL)", () => {
 		expect(found[0]?.tags).toEqual([tags[0] ?? ""]);
 		expect(found[0]?.score?.final).toBeNumber();
 
+		const fetched = await store.get(bank, found[0]?.id ?? "");
+		expect(fetched?.id).toBe(found[0]?.id ?? "");
+		expect(fetched?.tags).toEqual([tags[0] ?? ""]);
+		expect(await store.list(bank, { limit: 10, offset: 0 })).toHaveLength(3);
+
 		const counts = await store.listTags(bank);
 		for (const tag of tags) expect(counts).toContainEqual({ tag, count: 1 });
+		expect(await store.listTags(`contract-unwritten-${suffix}`)).toEqual([]);
 	}, 120_000);
 });

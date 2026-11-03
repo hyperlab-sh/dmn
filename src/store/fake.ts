@@ -92,10 +92,10 @@ export class FakeStore implements MemoryStore {
 	/** One page plus the filtered total, as Hindsight's list endpoint reports it. */
 	async listPage(
 		bank: string,
-		query: ListQuery,
+		query: ListQuery & { tagsMatch?: TagsMatch },
 	): Promise<{ items: MemoryRecord[]; total: number }> {
 		const filtered = (this.banks.get(bank) ?? []).filter((record) =>
-			matchesTags(record.tags, query.tags ?? [], "any_strict"),
+			matchesTags(record.tags, query.tags ?? [], query.tagsMatch ?? "any_strict"),
 		);
 		return {
 			items: filtered.slice(query.offset, query.offset + query.limit),
@@ -190,16 +190,19 @@ export function startFakeServer(): { url: string; stop: () => void } {
 			if (request.method === "GET" && path === "/memories/list") {
 				const limit = Number(url.searchParams.get("limit") ?? 100);
 				const offset = Number(url.searchParams.get("offset") ?? 0);
+				// Hindsight's documented default for the list endpoint is `any`.
+				const tagsMatch = (url.searchParams.get("tags_match") ?? "any") as TagsMatch;
 				const page = await store.listPage(bank, {
 					limit,
 					offset,
+					tagsMatch,
 					...(tags.length > 0 ? { tags } : {}),
 				});
 				return Response.json({ items: page.items.map(wire), total: page.total, limit, offset });
 			}
 			if (request.method === "GET" && path === "/tags") {
 				if (!store.hasBank(bank))
-					return Response.json({ detail: "bank not found" }, { status: 404 });
+					return Response.json({ detail: `Bank '${bank}' not found` }, { status: 404 });
 				const all = await store.listTags(bank);
 				const limit = Number(url.searchParams.get("limit") ?? 100);
 				const offset = Number(url.searchParams.get("offset") ?? 0);
