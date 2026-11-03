@@ -7,8 +7,7 @@ set -euo pipefail
 
 container_name="hindsight"
 volume_name="hindsight-data"
-image="${HINDSIGHT_IMAGE:-ghcr.io/vectorize-io/hindsight:latest}"
-health_url="${HINDSIGHT_HOST_URL:-http://127.0.0.1:8888}/health"
+image="ghcr.io/vectorize-io/hindsight:latest"
 
 load_env_file() {
 	local config_home="${XDG_CONFIG_HOME:-${HOME:-}/.config}"
@@ -30,7 +29,6 @@ collect_env_flags() {
 }
 
 cmd_start() {
-	load_env_file
 	if [ -z "${HINDSIGHT_API_LLM_PROVIDER:-}" ]; then
 		echo "HINDSIGHT_API_LLM_PROVIDER is not set (set it in the environment or in the dmn hindsight.env file)" >&2
 		exit 2
@@ -41,9 +39,8 @@ cmd_start() {
 		return
 	fi
 	collect_env_flags
-	# Optional: reuse an existing `claude` login by mounting its config directory
-	# (read-write, the CLI refreshes tokens there). Alternative: a `claude setup-token`
-	# token in HINDSIGHT_API_LLM_API_KEY.
+	# Opt-in: mount a claude config directory (see docs/hindsight.md for the exposure).
+	# The default route is a `claude setup-token` token in HINDSIGHT_API_LLM_API_KEY.
 	mount_flags=()
 	if [ -n "${HINDSIGHT_CLAUDE_DIR:-}" ]; then
 		mount_flags=(-v "${HINDSIGHT_CLAUDE_DIR}:/home/hindsight/.claude")
@@ -64,7 +61,8 @@ cmd_stop() {
 }
 
 cmd_status() {
-	local code
+	local code health_url
+	health_url="${HINDSIGHT_HOST_URL:-http://127.0.0.1:8888}/health"
 	code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$health_url" || true)"
 	if [ "$code" = "200" ]; then
 		echo "healthy"
@@ -77,6 +75,8 @@ cmd_status() {
 cmd_logs() {
 	exec docker logs -f --tail 100 "$container_name"
 }
+
+load_env_file
 
 case "${1:-}" in
 start) cmd_start ;;

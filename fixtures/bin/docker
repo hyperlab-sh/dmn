@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Test stub: records its arguments (one invocation per line) and prints canned output.
+# Test stub: records its arguments (one invocation per line); prints nothing, so `ps`
+# reports no existing container unless DOCKER_STUB_PS is set, which `ps` then echoes.
 printf '%s\n' "$*" >>"${DOCKER_STUB_LOG:?DOCKER_STUB_LOG must be set}"
-case "${1:-}" in
-ps) ;; # no existing container
-esac
+if [ "${1:-}" = "ps" ] && [ -n "${DOCKER_STUB_PS:-}" ]; then
+	echo "$DOCKER_STUB_PS"
+fi
 exit 0
