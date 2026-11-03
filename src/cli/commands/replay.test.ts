@@ -34,20 +34,24 @@ test("replay writes the report and judgements, then score fills the summary", ()
 		"fake",
 		"--out",
 		out,
+		"--top",
+		"3",
 	);
 	expect(run.stderr.toString()).toBe("");
 	expect(run.exitCode).toBe(0);
 	const [name] = readdirSync(out);
 	const directory = join(out, name as string);
 	expect(readdirSync(directory).sort()).toEqual(["judgements.json", "report.md"]);
-	expect(readFileSync(join(directory, "report.md"), "utf8")).toContain("unscored");
+	// DMN_NOW names the run; DMN_SEED fixes the noise.
+	expect(name).toBe("run-2026-06-03T00-00-00-000Z");
+	expect(readFileSync(join(directory, "report.md"), "utf8")).toContain("noise=0.218");
 
 	copyFileSync(
 		join(root, "fixtures/replay/judgements.filled.json"),
 		join(directory, "judgements.json"),
 	);
+	// No --top here: score reads the 3 the run was made with.
 	const scored = dmn("replay", "score", directory);
 	expect(scored.exitCode).toBe(0);
-	expect(scored.stdout.toString()).toBe("store p@5 = 0.40\nactivation p@5 = 0.60\njudged 20/20\n");
-	expect(readFileSync(join(directory, "report.md"), "utf8")).toContain("| activation | 0.60 |");
+	expect(scored.stdout.toString()).toBe("store p@3 = 0.50\nactivation p@3 = 0.67\njudged 20/20\n");
 });

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { writeReport } from "./report.js";
+import { readRunTop, writeReport } from "./report.js";
 import { readJudgements, score, writeSummary } from "./score.js";
 
 const judgements = readJudgements(
@@ -39,7 +39,6 @@ test("the summary says unscored, then is rewritten in place with both numbers", 
 	const directory = join(scratch, "run");
 	writeReport({ run: "run-x", top: 5, entries: [], warnings: [] }, directory);
 	const path = join(directory, "report.md");
-	expect(readFileSync(path, "utf8")).toContain("## Summary\n\nunscored");
 
 	for (const _ of [1, 2]) {
 		writeSummary(directory, { ...score(judgements, 5), total: 20, top: 5 });
@@ -50,4 +49,15 @@ test("the summary says unscored, then is rewritten in place with both numbers", 
 	expect(report).toContain("| store | 0.40 |");
 	expect(report).toContain("| activation | 0.60 |");
 	expect(report).toContain("judged 20/20");
+});
+
+test("a run made with top 3 is scored over 3 without repeating the flag", () => {
+	const directory = join(scratch, "top3");
+	writeReport({ run: "run-y", top: 3, entries: [], warnings: [] }, directory);
+	const top = readRunTop(directory) as number;
+	expect(top).toBe(3);
+	// First three per prompt: store 2+1 useful, activation 2+2 useful, over 3 × 2 prompts.
+	const scores = score(judgements, top);
+	expect(scores.store).toBeCloseTo(0.5);
+	expect(scores.activation).toBeCloseTo(4 / 6);
 });

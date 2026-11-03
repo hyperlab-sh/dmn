@@ -17,9 +17,20 @@ interface Line {
 	cwd?: string;
 	timestamp?: string;
 	isMeta?: boolean;
+	isCompactSummary?: boolean;
+	isSidechain?: boolean;
 	message?: { role?: string; content?: unknown };
 }
 
+const argumentsPattern = /<command-args>([\s\S]*?)<\/command-args>/;
+/** Shell escapes (`!`), local command output and interrupt markers are not prompts. */
+const ignoredPrefixes = [
+	"<local-command",
+	"<bash-input>",
+	"<bash-stdout>",
+	"<bash-stderr>",
+	"[Request interrupted",
+];
 const commandPattern = /<command-name>\/?([^<\s]+)<\/command-name>/;
 
 function parseLines(path: string): Line[] {
@@ -67,7 +78,8 @@ function toolEntries(content: unknown): { tools: string[]; skill?: string } {
 /**
  * The user prompts of a Claude Code transcript with what the cue needs: the recorded cwd, the
  * tools used since the previous prompt, and the latest slash command or `Skill` call.
- * Slash-command lines, tool results and meta lines are not prompts.
+ * A slash command's arguments are its prompt; a bare command, tool results, meta, compact-summary,
+ * sidechain and shell lines are not prompts.
  */
 export function promptsFrom(path: string): ReplayPrompt[] {
 	const prompts: ReplayPrompt[] = [];
@@ -84,13 +96,17 @@ export function promptsFrom(path: string): ReplayPrompt[] {
 			continue;
 		}
 		if (line.type !== "user" || line.isMeta) continue;
-		const text = typedText(content);
+		if (line.isCompactSummary || line.isSidechain) continue;
+		let text = typedText(content);
 		const command = commandPattern.exec(text);
 		if (command?.[1]) {
 			activeSkill = command[1];
+			// What the user typed after the command is the prompt; a bare command is not one.
+			text = argumentsPattern.exec(text)?.[1]?.trim() ?? "";
+		}
+		if (!text.trim() || ignoredPrefixes.some((prefix) => text.trimStart().startsWith(prefix))) {
 			continue;
 		}
-		if (!text.trim() || text.startsWith("<local-command")) continue;
 		prompts.push({
 			index: prompts.length,
 			text,

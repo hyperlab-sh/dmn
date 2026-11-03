@@ -3,4 +3,10 @@
 {"type":"user","cwd":"/home/dev/acme/widgets/services","timestamp":"2026-06-02T10:01:00.000Z","isMeta":true,"message":{"role":"user","content":"Caveat: local command output follows"}}
 {"type":"user","cwd":"/home/dev/acme/widgets/services","timestamp":"2026-06-02T10:01:30.000Z","message":{"role":"user","content":[{"type":"text","text":"Plan the migration of the retry module into units"},{"type":"text","text":"that can land separately"}]}}
 {"type":"assistant","cwd":"/home/dev/acme/widgets/services","timestamp":"2026-06-02T10:01:40.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"u3","name":"Edit","input":{"file_path":"retry.ts"}},{"type":"tool_use","id":"u4","name":"Edit","input":{"file_path":"retry.ts"}}]}}
+{"type":"user","cwd":"/home/dev/acme/widgets/services","timestamp":"2026-06-02T10:01:50.000Z","isCompactSummary":true,"message":{"role":"user","content":"This session is being continued from a previous conversation..."}}
+{"type":"user","cwd":"/home/dev/acme/widgets/services","timestamp":"2026-06-02T10:01:51.000Z","isSidechain":true,"message":{"role":"user","content":"Side thread question"}}
+{"type":"user","cwd":"/home/dev/acme/widgets/services","timestamp":"2026-06-02T10:01:52.000Z","message":{"role":"user","content":"<bash-input>ls</bash-input>"}}
+{"type":"user","cwd":"/home/dev/acme/widgets/services","timestamp":"2026-06-02T10:01:53.000Z","message":{"role":"user","content":"<bash-stdout>a.ts</bash-stdout><bash-stderr></bash-stderr>"}}
+{"type":"user","cwd":"/home/dev/acme/widgets/services","timestamp":"2026-06-02T10:01:54.000Z","message":{"role":"user","content":[{"type": "text", "text": "[Request interrupted by user]"}]}}
 {"type":"user","cwd":"/home/dev/acme/widgets/services","timestamp":"2026-06-02T10:02:00.000Z","message":{"role":"user","content":"Cap the retry delay in the module"}}
+{"type":"user","cwd":"/home/dev/acme/widgets/services","timestamp":"2026-06-02T10:03:00.000Z","message":{"role":"user","content":"<command-message>unit</command-message><command-name>/unit</command-name><command-args>fix the retry parser</command-args>"}}

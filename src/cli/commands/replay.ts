@@ -4,10 +4,11 @@ import { join } from "node:path";
 import { ConfigError, createStore, loadConfig } from "../../config/config.js";
 import type { Manifest } from "../../cue/stack.js";
 import { readManifests } from "../../replay/manifests.js";
-import { writeReport } from "../../replay/report.js";
+import { RunExistsError, readRunTop, writeReport } from "../../replay/report.js";
 import { readSeedMemories, runReplay, seedFakeStore } from "../../replay/run.js";
 import { readJudgements, score, writeSummary } from "../../replay/score.js";
 import { promptsFrom } from "../../replay/transcript.js";
+import { LocalState } from "../../state/state.js";
 import type { MemoryStore } from "../../store/types.js";
 
 const usage = `Usage:
@@ -22,13 +23,13 @@ interface Options {
 	files: string[];
 	store?: string;
 	out?: string;
-	top: number;
+	top?: number;
 	memories?: string;
 	manifests?: string;
 }
 
 function parseArguments(argv: string[]): Options {
-	const options: Options = { files: [], top: 5 };
+	const options: Options = { files: [] };
 	for (let i = 0; i < argv.length; i++) {
 		const argument = argv[i] as string;
 		if (!argument.startsWith("--")) {
@@ -79,10 +80,12 @@ function seededRandom(seed: string): () => number {
 }
 
 function scoreCommand(argv: string[]): number {
-	const { files, top } = parseArguments(argv);
+	const { files, top: override } = parseArguments(argv);
 	const [directory] = files;
 	if (!directory || files.length > 1) throw new UsageError("score takes exactly one run directory");
 	const judgements = readJudgements(join(directory, "judgements.json"));
+	// The run's own top unless overridden: dividing by another n would misreport both orders.
+	const top = override ?? readRunTop(directory) ?? 5;
 	const result = score(judgements, top);
 	writeSummary(directory, { ...result, total: judgements.length, top });
 	console.log(`store p@${top} = ${result.store.toFixed(2)}`);
@@ -117,7 +120,6 @@ async function replayCommand(argv: string[]): Promise<number> {
 
 	// A scratch state: replay must not touch the real use counts.
 	const scratch = mkdtempSync(join(tmpdir(), "dmn-replay-"));
-	const { LocalState } = await import("../../state/state.js");
 	const state = new LocalState({ directory: scratch, clock: () => now });
 	try {
 		const result = await runReplay({
@@ -125,7 +127,7 @@ async function replayCommand(argv: string[]): Promise<number> {
 			store,
 			state,
 			config,
-			top: options.top,
+			top: options.top ?? 5,
 			random,
 			now,
 			manifests,
@@ -146,7 +148,11 @@ export async function run(argv: string[]): Promise<number> {
 	try {
 		return argv[0] === "score" ? scoreCommand(argv.slice(1)) : await replayCommand(argv);
 	} catch (error) {
-		if (error instanceof UsageError || error instanceof ConfigError) {
+		if (
+			error instanceof UsageError ||
+			error instanceof ConfigError ||
+			error instanceof RunExistsError
+		) {
 			process.stderr.write(`dmn: ${error.message}\n\n${usage}`);
 			return 2;
 		}

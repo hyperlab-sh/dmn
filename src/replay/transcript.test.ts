@@ -31,10 +31,14 @@ test("session B: text blocks, meta lines skipped, skill from a Skill tool call",
 		"What is the state of the retry module?",
 		"Plan the migration of the retry module into units\nthat can land separately",
 		"Cap the retry delay in the module",
+		"fix the retry parser",
 	]);
 	expect(prompts[0]?.activeSkill).toBeUndefined();
 	expect(prompts[1]?.activeSkill).toBe("plan");
 	expect(prompts[1]?.recentTools).toEqual(["Skill", "Read"]);
 	expect(prompts[2]?.recentTools).toEqual(["Edit", "Edit"]);
+	// Compact summary, sidechain, shell and interrupt lines left prompt 3's tools intact.
+	expect(prompts[3]?.activeSkill).toBe("unit");
+	expect(prompts[3]?.recentTools).toEqual([]);
 	expect(prompts[2]?.cwd).toBe("/home/dev/acme/widgets/services");
 });
