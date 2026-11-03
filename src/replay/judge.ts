@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Judge } from "../judge/types.js";
+import { containsSecret } from "../retain/filter.js";
 import type { Judgement } from "./report.js";
 import { readJudgements } from "./score.js";
 
@@ -50,43 +51,58 @@ export function annotateReport(report: string, judgements: Judgement[]): string 
 
 /**
  * Fills `judgements.json` of a run from `judge`: each memory is judged once per prompt however
- * many orders show it. Entries the judge did not answer stay as they were.
+ * many orders show it, and an entry that already has an answer keeps it, so a new threshold
+ * costs no calls and an interrupted run resumes. Prompts and memories holding a secret are
+ * never sent; their entries stay as they were. Answers are saved after every prompt; a judge
+ * failure stops the run and is returned with what was answered so far.
  */
 export async function judgeRun(
 	directory: string,
 	judge: Judge,
 	threshold: number,
-): Promise<{ judged: number; total: number }> {
-	const judgements = readJudgements(join(directory, "judgements.json"));
+): Promise<{ judged: number; total: number; error?: Error }> {
+	const judgementsPath = join(directory, "judgements.json");
+	const reportPath = join(directory, "report.md");
+	const judgements = readJudgements(judgementsPath);
 	const memories = readTexts(join(directory, "memories.json"));
 	const prompts = readTexts(join(directory, "prompts.json"));
 
-	const ids = new Map<number, Set<string>>();
-	for (const { prompt, id } of judgements) {
-		if (memories[id] === undefined) continue;
-		if (!ids.has(prompt)) ids.set(prompt, new Set());
-		ids.get(prompt)?.add(id);
+	const pending = new Map<number, Set<string>>();
+	for (const { prompt, id, judge: answered } of judgements) {
+		const text = memories[id];
+		if (answered || text === undefined || containsSecret(text)) continue;
+		if (!pending.has(prompt)) pending.set(prompt, new Set());
+		pending.get(prompt)?.add(id);
 	}
-	const answers = new Map<string, { useful: number; level: number }>();
-	for (const [prompt, set] of ids) {
+	const save = () => {
+		for (const entry of judgements) {
+			if (entry.judge) entry.useful = entry.judge.useful >= threshold;
+		}
+		writeFileSync(judgementsPath, `${JSON.stringify(judgements, null, 2)}\n`);
+		writeFileSync(reportPath, annotateReport(readFileSync(reportPath, "utf8"), judgements));
+	};
+
+	let failure: Error | undefined;
+	for (const [prompt, ids] of pending) {
 		const text = prompts[prompt];
-		if (text === undefined) continue;
-		const input = [...set].map((id) => ({ id, text: memories[id] as string }));
-		for (const answer of await judge.judge(text, input)) {
-			answers.set(`${prompt}\0${answer.id}`, { useful: answer.useful, level: answer.level });
+		if (text === undefined || containsSecret(text)) continue;
+		const input = [...ids].map((id) => ({ id, text: memories[id] as string }));
+		try {
+			const answers = new Map<string, { useful: number; level: number }>();
+			for (const answer of await judge.judge(text, input)) {
+				answers.set(answer.id, { useful: answer.useful, level: answer.level });
+			}
+			for (const entry of judgements) {
+				const answer = entry.prompt === prompt ? answers.get(entry.id) : undefined;
+				if (answer) entry.judge = answer;
+			}
+			save();
+		} catch (error) {
+			failure = error as Error;
+			break;
 		}
 	}
-
-	let judged = 0;
-	for (const entry of judgements) {
-		const answer = answers.get(`${entry.prompt}\0${entry.id}`);
-		if (!answer) continue;
-		entry.judge = answer;
-		entry.useful = answer.useful >= threshold;
-		judged += 1;
-	}
-	writeFileSync(join(directory, "judgements.json"), `${JSON.stringify(judgements, null, 2)}\n`);
-	const reportPath = join(directory, "report.md");
-	writeFileSync(reportPath, annotateReport(readFileSync(reportPath, "utf8"), judgements));
-	return { judged, total: judgements.length };
+	save();
+	const judged = judgements.filter((entry) => entry.judge).length;
+	return { judged, total: judgements.length, ...(failure && { error: failure }) };
 }

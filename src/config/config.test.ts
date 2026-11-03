@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultActivationParameters } from "../activation/act-r.js";
-import { ConfigError, createJudge, loadConfig } from "./config.js";
+import { ConfigError, createJudge, createStore, loadConfig } from "./config.js";
 
 let root: string;
 let emptyDir: string;
@@ -58,7 +58,7 @@ test("returns the documented defaults when config.json is absent", () => {
 		retainTimeoutMs: 60_000,
 		fanCacheSeconds: 300,
 		activation: { ...defaultActivationParameters },
-		judge: { provider: "none", threshold: 0.5, intrusionThreshold: 0.7, timeoutMs: 5000 },
+		judge: { provider: "none", threshold: 0.5, intrusionThreshold: 0.7, timeoutMs: 30_000 },
 	});
 });
 
@@ -122,12 +122,22 @@ test("judge block merges over its defaults and rejects bad values", () => {
 		provider: "laya",
 		threshold: 0.3,
 		intrusionThreshold: 0.7,
-		timeoutMs: 5000,
+		timeoutMs: 30_000,
 		baseUrl: "http://localhost:9000",
 	});
 	expect(() => load({ provider: "openai" })).toThrow(/judge\.provider/);
 	expect(() => load({ threshold: 2 })).toThrow(/judge\.threshold/);
 	expect(() => load({ apiKey: "x" })).toThrow(/judge\.apiKey/);
+});
+
+test("requireStore: false lets a store-free command load without DMN_STORE_URL", () => {
+	const config = loadConfig({
+		env: { HOME: "/home/test" },
+		configDir: emptyDir,
+		requireStore: false,
+	});
+	expect(config.storeUrl).toBe("");
+	expect(() => createStore(config)).toThrow(/DMN_STORE_URL/);
 });
 
 test("createJudge: none gives no judge, laya needs LAYA_API_KEY", () => {

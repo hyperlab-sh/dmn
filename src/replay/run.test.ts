@@ -115,6 +115,31 @@ test("a long prompt is cut to 120 characters in the report", async () => {
 	expect(report).not.toContain("x".repeat(121));
 });
 
+test("a prompt holding a secret is not written to prompts.json", async () => {
+	const secret = "api_key=abcdef123456";
+	const at = (text: string) => ({
+		index: 0,
+		text,
+		cwd: "/home/dev/acme/widgets",
+		recentTools: [],
+		at: "",
+	});
+	const result = await runReplay({
+		prompts: [at(`fix the parser, ${secret}`), at("fix the parser")],
+		store,
+		state,
+		config,
+		top: 5,
+		random: counter(),
+		now,
+	});
+	const directory = join(scratch, "secret");
+	writeReport(result, directory);
+	expect(JSON.parse(readFileSync(join(directory, "prompts.json"), "utf8"))).toEqual({
+		"2": "fix the parser",
+	});
+});
+
 test("two runs with the same seed and clock write byte-identical files", async () => {
 	for (const name of ["a", "b"]) writeReport(await replay(), join(scratch, name));
 	for (const file of ["report.md", "judgements.json"]) {

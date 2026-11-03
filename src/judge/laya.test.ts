@@ -64,10 +64,26 @@ test("one batch item per memory, plain-text state, two questions, bearer key, on
 		"Prompt from the engineer:\nthe prompt\n\nMemory from a past session:\nfirst",
 		"Prompt from the engineer:\nthe prompt\n\nMemory from a past session:\nsecond",
 	]);
-	const questions = request?.body.requests[0]?.questions as Record<string, { type: string }>;
-	expect(Object.keys(questions)).toEqual(["useful", "level"]);
-	expect(questions.useful?.type).toBe("noul");
-	expect(questions.level?.type).toBe("score");
+	expect(request?.body.requests[0]?.questions).toEqual({
+		useful: {
+			type: "noul",
+			instructions: "Would the memory help the engineer do what the prompt asks?",
+			criteria: {
+				true: "The memory tells the engineer something they need to do what the prompt asks",
+				false: "The memory tells the engineer nothing they need to do what the prompt asks",
+			},
+		},
+		level: {
+			type: "score",
+			instructions: "How much the memory helps the engineer do what the prompt asks.",
+			criteria: [
+				"useless: unrelated to the prompt",
+				"background: about the same project or area, but not needed for this prompt",
+				"helpful: contains something relevant the engineer can use for this prompt",
+				"decisive: contains the fact or decision the engineer needs to do what the prompt asks",
+			],
+		},
+	});
 	// No ids, tags or metadata leave the machine: the body is states and questions only.
 	const wire = JSON.stringify(request?.body);
 	expect(wire).not.toContain("m-1");
@@ -118,7 +134,29 @@ test.each([400, 401, 402, 422])("throws JudgeError naming %d without retrying", 
 	expect(recorded).toHaveLength(1);
 });
 
-test("a malformed response is a JudgeError", async () => {
-	const { judge } = judgeWith([() => Response.json({ results: [{ error: "bad" }] })]);
-	expect(judge.judge("p", [memory("a")])).rejects.toBeInstanceOf(JudgeError);
+test("a malformed or non-JSON 2xx response is a JudgeError", async () => {
+	const bad = judgeWith([() => Response.json({ results: [{ error: "bad" }] })]);
+	await expect(bad.judge.judge("p", [memory("a")])).rejects.toBeInstanceOf(JudgeError);
+	const html = judgeWith([() => new Response("<html>", { status: 200 })]);
+	await expect(html.judge.judge("p", [memory("a")])).rejects.toThrow("response is not JSON");
+});
+
+test("Retry-After as an HTTP date is read against the injected clock", async () => {
+	const { recorded, fetcher } = fakeFetch([
+		status(429, { "retry-after": "Wed, 21 Oct 2015 07:28:10 GMT" }),
+		ok(1),
+	]);
+	const sleeps: number[] = [];
+	const judge = new LayaJudge({
+		apiKey: "k",
+		fetch: fetcher,
+		sleep: async (ms) => {
+			sleeps.push(ms);
+		},
+		random: () => 0,
+		now: () => Date.parse("Wed, 21 Oct 2015 07:28:00 GMT"),
+	});
+	await judge.judge("p", [memory("a")]);
+	expect(recorded).toHaveLength(2);
+	expect(sleeps).toEqual([10_000]);
 });

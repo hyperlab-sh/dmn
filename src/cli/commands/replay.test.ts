@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import {
 	copyFileSync,
-	existsSync,
+	cpSync,
 	mkdirSync,
 	mkdtempSync,
 	readdirSync,
@@ -13,11 +13,8 @@ import { join } from "node:path";
 
 const root = new URL("../../..", import.meta.url).pathname;
 let scratch: string;
-
-beforeAll(() => {
-	scratch = mkdtempSync(join(tmpdir(), "dmn-replay-cli-"));
-});
-afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+let base: string;
+let baseRun: { exitCode: number; stderr: string };
 
 const dmn = (args: string[], extraEnv: Record<string, string> = {}) => {
 	const { DMN_STORE_URL: _ignored, ...env } = process.env;
@@ -33,7 +30,16 @@ const dmn = (args: string[], extraEnv: Record<string, string> = {}) => {
 	});
 };
 
-test("replay writes the report and judgements, then score fills the summary", () => {
+/** A private copy of the shared run, for a case that rewrites it. */
+function copyOfBase(name: string): string {
+	const directory = join(scratch, name);
+	cpSync(base, directory, { recursive: true });
+	return directory;
+}
+
+// One replay over the fixtures with the fake store; every case below reads or copies it.
+beforeAll(() => {
+	scratch = mkdtempSync(join(tmpdir(), "dmn-replay-cli-"));
 	const out = join(scratch, "out");
 	const run = dmn([
 		"replay",
@@ -46,20 +52,24 @@ test("replay writes the report and judgements, then score fills the summary", ()
 		"--top",
 		"3",
 	]);
-	expect(run.stderr.toString()).toBe("");
-	expect(run.exitCode).toBe(0);
-	const [name] = readdirSync(out);
-	const directory = join(out, name as string);
-	expect(readdirSync(directory).sort()).toEqual([
+	baseRun = { exitCode: run.exitCode, stderr: run.stderr.toString() };
+	base = join(out, readdirSync(out)[0] as string);
+});
+afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+
+test("replay writes the report and judgements, then score fills the summary", () => {
+	expect(baseRun).toEqual({ exitCode: 0, stderr: "" });
+	expect(readdirSync(base).sort()).toEqual([
 		"judgements.json",
 		"memories.json",
 		"prompts.json",
 		"report.md",
 	]);
 	// DMN_NOW names the run; DMN_SEED fixes the noise.
-	expect(name).toBe("run-2026-06-03T00-00-00-000Z");
-	expect(readFileSync(join(directory, "report.md"), "utf8")).toContain("noise=0.218");
+	expect(base.endsWith("run-2026-06-03T00-00-00-000Z")).toBe(true);
+	expect(readFileSync(join(base, "report.md"), "utf8")).toContain("noise=0.218");
 
+	const directory = copyOfBase("filled");
 	copyFileSync(
 		join(root, "fixtures/replay/judgements.filled.json"),
 		join(directory, "judgements.json"),
@@ -70,84 +80,51 @@ test("replay writes the report and judgements, then score fills the summary", ()
 	expect(scored.stdout.toString()).toBe("store p@3 = 0.50\nactivation p@3 = 0.67\njudged 20/20\n");
 });
 
-test("replay judge fills entries from the fake judge, annotates the report, and score runs after it", () => {
-	const out = join(scratch, "judged");
-	const files = ["fixtures/replay/session-a.jsonl", "fixtures/replay/session-b.jsonl"];
-	dmn(["replay", ...files, "--store", "fake", "--out", out, "--top", "3"]);
-	const directory = join(out, readdirSync(out)[0] as string);
+test("replay judge fills the run from the fake judge; a stricter threshold reuses the answers; score follows", () => {
+	const directory = copyOfBase("judged");
 	const secret = "laya-key-must-not-leak";
+	const useful = () =>
+		(
+			JSON.parse(readFileSync(join(directory, "judgements.json"), "utf8")) as { useful: boolean }[]
+		).filter((entry) => entry.useful).length;
 
 	const judged = dmn(["replay", "judge", directory, "--judge", "fake"], { LAYA_API_KEY: secret });
 	expect(judged.stderr.toString()).toBe("");
 	expect(judged.exitCode).toBe(0);
-	const total = (JSON.parse(readFileSync(join(directory, "judgements.json"), "utf8")) as unknown[])
-		.length;
-	expect(judged.stdout.toString()).toBe(`judged ${total}/${total}\n`);
-
-	const entries = JSON.parse(readFileSync(join(directory, "judgements.json"), "utf8"));
-	type Entry = {
-		prompt: number;
-		id: string;
-		order: string;
-		useful: boolean;
-		judge: { useful: number; level: number };
-	};
-	for (const entry of entries as Entry[]) {
-		expect(entry.useful).toBe(entry.judge.useful >= 0.5);
-		expect(entry.judge.level).toBeGreaterThanOrEqual(0);
-		expect(entry.judge.level).toBeLessThanOrEqual(3);
-	}
-	// A memory shown in both orders of a prompt gets one answer, written to both entries.
-	const both = (entries as Entry[]).filter((a) =>
-		(entries as Entry[]).some((b) => b !== a && b.prompt === a.prompt && b.id === a.id),
-	);
-	expect(both.length).toBeGreaterThan(0);
-	expect(entries.some((e: Entry) => e.useful)).toBe(true);
-	expect(entries.some((e: Entry) => !e.useful)).toBe(true);
-	const first = entries[0] as Entry;
+	expect(judged.stdout.toString()).toBe("judged 42/42\n");
+	expect(useful()).toBe(14);
+	const [first] = JSON.parse(readFileSync(join(directory, "judgements.json"), "utf8"));
+	expect(first.judge.useful).toBeCloseTo(3 / 7, 10);
+	expect(first.judge.level).toBeCloseTo(9 / 7, 10);
+	expect(first.useful).toBe(false);
 	expect(readFileSync(join(directory, "report.md"), "utf8")).toContain(
-		`${first.id} P(useful)=${first.judge.useful.toFixed(2)} `,
+		"1. 00000000-0000-4000-8000-000000000001 P(useful)=0.43 score=3 Run the full test suite",
 	);
 
-	// --threshold moves `useful`, not the stored probability.
-	const strict = dmn(["replay", "judge", directory, "--judge", "fake", "--threshold", "1.0"]);
-	expect(strict.exitCode).toBe(0);
-	const after = JSON.parse(readFileSync(join(directory, "judgements.json"), "utf8")) as Entry[];
-	expect(after.map((e) => e.judge)).toEqual((entries as Entry[]).map((e) => e.judge));
-	expect(after.every((e) => e.useful === e.judge.useful >= 1)).toBe(true);
+	expect(
+		dmn(["replay", "judge", directory, "--judge", "fake", "--threshold", "1.0"]).exitCode,
+	).toBe(0);
+	expect(useful()).toBe(2);
 
+	// The 1.0 threshold left two useful entries, so the scores follow it.
 	const scored = dmn(["replay", "score", directory]);
-	expect(scored.exitCode).toBe(0);
-	expect(scored.stdout.toString()).toMatch(
-		new RegExp(
-			`^store p@3 = \\d\\.\\d\\d\\nactivation p@3 = \\d\\.\\d\\d\\njudged ${total}/${total}\\n$`,
-		),
-	);
+	expect(scored.stdout.toString()).toBe("store p@3 = 0.05\nactivation p@3 = 0.05\njudged 42/42\n");
 	for (const file of readdirSync(directory)) {
 		expect(readFileSync(join(directory, file), "utf8")).not.toContain(secret);
 	}
 });
 
-test("replay judge exits 2 without memories.json, without a configured judge, and without the key", () => {
-	const out = join(scratch, "fresh");
-	dmn(["replay", "fixtures/replay/session-a.jsonl", "--store", "fake", "--out", out]);
-	const fresh = join(out, readdirSync(out)[0] as string);
-
-	const none = dmn(["replay", "judge", fresh]);
+test("replay judge exits 2 with no judge configured, and for a run without memories.json", () => {
+	const none = dmn(["replay", "judge", base]);
 	expect(none.exitCode).toBe(2);
 	expect(none.stderr.toString()).toContain("no judge is configured");
 	expect(none.stderr.toString()).toContain("--judge fake");
-
-	const keyless = dmn(["replay", "judge", fresh, "--judge", "laya"]);
-	expect(keyless.exitCode).toBe(2);
-	expect(keyless.stderr.toString()).toContain("LAYA_API_KEY is not set");
 
 	// A run made before this unit: only report.md and judgements.json.
 	const old = join(scratch, "old");
 	mkdirSync(old);
 	for (const name of ["report.md", "judgements.json"])
-		copyFileSync(join(fresh, name), join(old, name));
-	expect(existsSync(join(old, "memories.json"))).toBe(false);
+		copyFileSync(join(base, name), join(old, name));
 	const legacy = dmn(["replay", "judge", old, "--judge", "fake"]);
 	expect(legacy.exitCode).toBe(2);
 	expect(legacy.stderr.toString()).toContain("memories.json");

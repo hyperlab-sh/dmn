@@ -52,6 +52,11 @@ export interface LoadConfigOptions {
 	env: Record<string, string | undefined>;
 	/** Directory holding `config.json`; defaults to `$XDG_CONFIG_HOME/dmn`. */
 	configDir?: string;
+	/**
+	 * Default true. A command that never touches the store passes false and gets an empty
+	 * `storeUrl`; `createStore` refuses it.
+	 */
+	requireStore?: boolean;
 }
 
 const numberKeys = [
@@ -102,11 +107,11 @@ function isHttpUrl(value: string): boolean {
 
 export function loadConfig(options: LoadConfigOptions): Config {
 	const { env } = options;
-	const storeUrl = env.DMN_STORE_URL;
-	if (!storeUrl) {
+	const storeUrl = env.DMN_STORE_URL ?? "";
+	if (!storeUrl && options.requireStore !== false) {
 		throw new ConfigError("DMN_STORE_URL is not set; point it at the memory store (or `fake:`)");
 	}
-	if (storeUrl !== "fake:" && !isHttpUrl(storeUrl)) {
+	if (storeUrl && storeUrl !== "fake:" && !isHttpUrl(storeUrl)) {
 		throw new ConfigError("DMN_STORE_URL must be an http(s) URL or fake:");
 	}
 	const configDir = options.configDir ?? xdgDirectory(env, "XDG_CONFIG_HOME", ".config");
@@ -129,7 +134,7 @@ export function loadConfig(options: LoadConfigOptions): Config {
 		retainTimeoutMs: 60_000,
 		fanCacheSeconds: 300,
 		activation: { ...defaultActivationParameters },
-		judge: { provider: "none", threshold: 0.5, intrusionThreshold: 0.7, timeoutMs: 5000 },
+		judge: { provider: "none", threshold: 0.5, intrusionThreshold: 0.7, timeoutMs: 30_000 },
 	};
 
 	for (const key of numberKeys) {
@@ -257,6 +262,7 @@ export function createJudge(
  * Anything else is a Hindsight base URL.
  */
 export function createStore(config: Config): MemoryStore {
+	if (!config.storeUrl) throw new ConfigError("DMN_STORE_URL is not set");
 	if (config.storeUrl === "fake:") return new FakeStore();
 	return new HindsightStore({
 		baseUrl: config.storeUrl,

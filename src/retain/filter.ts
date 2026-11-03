@@ -53,6 +53,15 @@ function isFileIndexing(text: string): boolean {
 	return paths / lines.length >= minimumPathShare;
 }
 
+/** Whether `text` holds a secret or a credential assignment. */
+export function containsSecret(text: string): boolean {
+	return (
+		secretPatterns.some((pattern) => pattern.test(text)) ||
+		envAssignment.test(text) ||
+		credentialAssignment.test(text)
+	);
+}
+
 /** Decides whether a turn may become a memory. Protocol traffic and secrets never do. */
 export function shouldRetain(turn: Turn): RetainVerdict {
 	const { text } = turn;
