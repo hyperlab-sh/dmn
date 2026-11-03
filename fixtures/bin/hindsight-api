@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Test stub for hindsight-api: stays alive (its command line stays observable in ps) until
+# `stop` terminates it. Records its arguments and HINDSIGHT_API_* environment to
+# $HOST_STUB_LOG best effort; the parent script does not wait for the write.
+{
+	printf 'args %s\n' "$*"
+	env | grep '^HINDSIGHT_API_' | sort | sed 's/^/env /'
+} >>"${HOST_STUB_LOG:?HOST_STUB_LOG must be set}"
+sleep 30 &
+sleeper_pid=$!
+trap 'kill "$sleeper_pid" 2>/dev/null || true; exit 0' TERM INT
+wait "$sleeper_pid" || true

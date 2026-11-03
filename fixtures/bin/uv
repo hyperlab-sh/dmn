@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Test stub for uv: records its arguments (one invocation per line); `uv venv ... <dir>` also
+# creates <dir>/bin/hindsight-api wired to the sibling hindsight-api stub, so a later
+# `install` is a no-op and `start` spawns a live process from the venv.
+printf '%s\n' "$*" >>"${HOST_STUB_LOG:?HOST_STUB_LOG must be set}"
+if [ "${1:-}" = "venv" ] && [ "$#" -ge 2 ]; then
+	venv_dir="${!#}"
+	mkdir -p "${venv_dir}/bin"
+	printf '#!/usr/bin/env bash\nexec %q/hindsight-api "$@"\n' "${0%/*}" >"${venv_dir}/bin/hindsight-api"
+	chmod +x "${venv_dir}/bin/hindsight-api"
+fi
+exit 0

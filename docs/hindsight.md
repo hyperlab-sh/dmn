@@ -1,78 +1,86 @@
 # Running Hindsight locally
 
 Contract tests and day-to-day use need a running [Hindsight](https://github.com/vectorize-io/hindsight).
-`scripts/hindsight-host.sh` runs the official Docker image with a persistent volume, local
-embeddings and reranker, and the LLM provider taken from your environment. Nothing leaves the
-machine except the calls the LLM provider itself makes.
+`scripts/hindsight-host.sh` installs and runs the `hindsight-api` pip package natively: the
+embedded database lives under your home directory, the local embedding and reranker models are
+bundled with the package, and the LLM provider is taken from your environment. Nothing leaves
+the machine except the calls the LLM provider itself makes.
 
 ## Prerequisites
 
-- Docker, with permission to run containers.
-- Disk: the full image is about 4 GB on arm64 and about 9 GB on amd64. The embedding and reranker
-  models are bundled, so there is no separate model download on first start; first start still
-  takes a minute or two while the embedded database initialises.
-- RAM: about 1 GB idle, 1.5 GB under load for the API, plus the UI and database. Give the machine
-  at least 2 GB free.
+- `uv` on PATH (it creates the venv, and fetches the Python for it if the system one is
+  unsuitable — the script pins Python 3.12, because Hindsight's pinned dependencies do not
+  ship wheels for the newest Pythons).
+- Disk: the venv with the package and the bundled models is about 6.5 GB; give the machine
+  about 8 GB free.
+- RAM: about 2 GB idle once the models are loaded, more under load; give the machine 4 GB free.
 - An LLM provider (see below).
+
+## Commands
+
+```sh
+bash scripts/hindsight-host.sh install   # create the venv and install hindsight-api into it
+bash scripts/hindsight-host.sh start     # start the API detached on 127.0.0.1:8888
+bash scripts/hindsight-host.sh status    # prints "healthy" and exits 0 when GET /health is 200, else exits 1
+bash scripts/hindsight-host.sh logs      # follow the server log
+bash scripts/hindsight-host.sh stop      # terminate the server and remove the pid file
+```
+
+- `install` creates the venv at `${XDG_DATA_HOME:-$HOME/.local/share}/dmn/hindsight` with
+  `uv venv` and installs `hindsight-api` into it with `uv pip install`. A second `install` is
+  a no-op that says so. Without `uv` on PATH it exits 2 naming it.
+- `start` starts `hindsight-api --host <bind> --port <port>` detached from that venv, with the
+  `HINDSIGHT_API_*` environment, and leaves it running when the shell exits. It writes the
+  process id to `${XDG_STATE_HOME:-$HOME/.local/state}/dmn/hindsight.pid` and appends the
+  server output to `hindsight.log` beside it. When the pid file names a live process it prints
+  `already running (pid N)` and exits 0. When the venv is missing, `start` runs `install`
+  first.
+- The first `start` after installing takes roughly half a minute while the embedded database
+  initialises and the models load; `status` answers `unhealthy` until then.
+- `stop` sends TERM, waits up to 75 s, then removes the pid file. A pid file naming a dead
+  process is removed with a message and exit 0.
+- Run `start` from a shell; there is no service-manager unit yet (logging in and running
+  `start` is the way to bring the service back after a reboot).
 
 ## Configuration
 
-The script passes every `HINDSIGHT_API_*` variable in its environment to the container, after
-sourcing an optional env file at `${XDG_CONFIG_HOME:-$HOME/.config}/dmn/hindsight.env`. The file
-lives outside the repository on purpose; keep it `chmod 600` since it may hold a token.
+The script sources an optional env file at `${XDG_CONFIG_HOME:-$HOME/.config}/dmn/hindsight.env`
+and passes every `HINDSIGHT_API_*` variable in its environment to the server. The file lives
+outside the repository on purpose; keep it `chmod 600` since it may hold a token.
 
 `HINDSIGHT_API_LLM_PROVIDER` is required: `start` exits 2 without it.
 
-Example `hindsight.env` for a developer machine (the file is sourced by the shell, so `$HOME`
-and other variables expand):
+Example `hindsight.env` (the file is sourced by the shell, so `$HOME` and other variables
+expand):
 
 ```sh
 HINDSIGHT_API_LLM_PROVIDER=claude-code
 HINDSIGHT_API_LLM_MODEL=claude-sonnet-5-5
 HINDSIGHT_API_LLM_TIMEOUT=300
-HINDSIGHT_CLAUDE_DIR=$HOME/.claude
 ```
 
-Script-level variables, also read from the env file but not passed to the container:
+Script-level variables, also read from the env file but not server configuration:
 
-| Variable               | Meaning                                                                                                                                | Default                 |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| `HINDSIGHT_CLAUDE_DIR` | Directory mounted read-write at `/home/hindsight/.claude`; set it to use the recommended login route (see the warning under providers) | unset                   |
-| `HINDSIGHT_HOST_URL`   | Base URL `status` probes                                                                                                               | `http://127.0.0.1:8888` |
+| Variable              | Meaning                                            | Default                |
+| --------------------- | -------------------------------------------------- | ---------------------- |
+| `HINDSIGHT_HOST_BIND` | Address `start` binds                              | `127.0.0.1`            |
+| `HINDSIGHT_HOST_PORT` | Port `start` binds                                 | `8888`                 |
+| `HINDSIGHT_HOST_URL`  | Base URL `status` probes (overrides the two above) | `http://<bind>:<port>` |
 
-The script forwards only `HINDSIGHT_API_*` variables to the container.
-
-## Commands
-
-```sh
-bash scripts/hindsight-host.sh start    # create or restart the container "hindsight"
-bash scripts/hindsight-host.sh status   # prints "healthy" and exits 0 when GET /health is 200, else exits 1
-bash scripts/hindsight-host.sh logs     # follow the container logs
-bash scripts/hindsight-host.sh stop     # stop the container; the volume "hindsight-data" is kept
-```
-
-The container is named `hindsight`, uses the named volume `hindsight-data` (embedded database at
-`/home/hindsight/.pg0`), runs with `--shm-size=1g` and restarts unless stopped. The API (8888)
-and UI (9999) bind to `127.0.0.1` only. The container is created once and reused: environment
-changes need `docker rm -f hindsight` before the next `start`. Data survives that, because it
-lives in the volume.
+Hindsight keeps its own data (the embedded `pg0` database) under `~/.hindsight`; it survives
+`stop` and `start`.
 
 ## LLM providers
 
-| Provider                                        | Setup                                                                                                                                                                                                                                                                                                          |
-| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `claude-code` (default for a developer machine) | Uses your Claude subscription. The image bundles the `claude` CLI but no login. Default: mount your logged-in `claude` config with `HINDSIGHT_CLAUDE_DIR=$HOME/.claude` (see the warning below). Alternative: run `claude setup-token` and put the token in `HINDSIGHT_API_LLM_API_KEY`, which mounts nothing. |
-| `anthropic`, `openai`, others                   | `HINDSIGHT_API_LLM_PROVIDER`, `HINDSIGHT_API_LLM_MODEL` and `HINDSIGHT_API_LLM_API_KEY`. See the Hindsight configuration docs for the full list.                                                                                                                                                               |
+| Provider                                          | Setup                                                                                                                                                                      |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `claude-code` (default for a single-user machine) | Uses the Claude subscription of the user the server runs as. `claude` must be on PATH and logged in (`claude auth login`); no credential is copied or configured anywhere. |
+| `anthropic`, `openai`, others                     | `HINDSIGHT_API_LLM_PROVIDER`, `HINDSIGHT_API_LLM_MODEL` and `HINDSIGHT_API_LLM_API_KEY`. See the Hindsight configuration docs for the full list.                           |
 
 Notes for `claude-code`:
 
-- Each LLM turn drives the CLI and takes several seconds, so retain is slow; raise
+- Each LLM turn drives the `claude` CLI and takes several seconds, so retain is slow; raise
   `HINDSIGHT_API_LLM_TIMEOUT` as shown above.
-- **Warning: `HINDSIGHT_CLAUDE_DIR`.** Mounting your `~/.claude` exposes every session
-  transcript (which can hold secrets), `settings.json` hooks, `CLAUDE.md` and MCP config to the
-  container, read-write. This is the default for a developer machine because it reuses your
-  login. To avoid the exposure, use the `setup-token` token instead, or mount a dedicated
-  directory that holds only a copied credential.
 - Use a model id your account can access. A wrong id fails retain with "issue with the selected
   model".
 
