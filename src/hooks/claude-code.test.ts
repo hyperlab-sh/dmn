@@ -108,27 +108,55 @@ test("nothing recalled gives no output", async () => {
 	).toBeNull();
 });
 
-test("a post-tool event gives one marked line when the draw is won, then nothing in the cooldown", async () => {
-	const postTool = (session_id: string, extra: object = {}) =>
-		event({
-			hook_event_name: "PostToolUse",
-			session_id,
-			tool_name: "Read",
-			tool_input: { file_path: "retry.ts" },
-			...extra,
-		});
-	// A threshold far below the memory's activation makes the draw certain.
-	const eager = { ...deps, config: { ...deps.config, intrusionThreshold: -100 } };
-	const first = await handleHookEvent(postTool("intrusive"), eager);
-	expect(first?.hookSpecificOutput.hookEventName).toBe("PostToolUse");
-	expect(first?.hookSpecificOutput.additionalContext).toMatch(/^\[m:[^\]\n]+\] retry with jitter$/);
-	expect(await handleHookEvent(postTool("intrusive"), eager)).toBeNull();
-	// Another session has its own cooldown; a threshold above reach, or null, never surfaces.
-	const never = { ...deps, config: { ...deps.config, intrusionThreshold: 100 } };
-	expect(await handleHookEvent(postTool("quiet"), never)).toBeNull();
-	const off = { ...deps, config: { ...deps.config, intrusionThreshold: null } };
+const postTool = (session_id: string) =>
+	event({
+		hook_event_name: "PostToolUse",
+		session_id,
+		tool_name: "Read",
+		tool_input: { file_path: "retry.ts" },
+	});
+// A threshold far below the memory's activation makes the draw certain.
+const eager = () => ({ ...deps, config: { ...deps.config, intrusionThreshold: -100 } });
+
+test("a post-tool event gives one marked line and restarts the cooldown", async () => {
+	const output = await handleHookEvent(postTool("shape"), eager());
+	expect(output?.hookSpecificOutput.hookEventName).toBe("PostToolUse");
+	expect(output?.hookSpecificOutput.additionalContext).toMatch(
+		/^\[m:[^\]\n]+\] retry with jitter$/,
+	);
+	expect(state.toolCallsSince("shape")).toBe(0);
+});
+
+test("a memory too long for the budget prints nothing and does not restart the cooldown", async () => {
+	const tight = { ...eager(), config: { ...eager().config, budgetTokens: 1 } };
+	expect(await handleHookEvent(postTool("budget"), tight)).toBeNull();
+	expect(state.toolCallsSince("budget")).toBe(Number.POSITIVE_INFINITY);
+});
+
+test("a post-tool event recalls three candidates, and none when intrusions are off", async () => {
+	const spy = new RecallSpyStore();
+	await handleHookEvent(postTool("top-k"), { ...eager(), store: spy });
+	expect(spy.topKs).toEqual([3]);
+	const off = { ...deps, store: spy, config: { ...deps.config, intrusionThreshold: null } };
+	spy.topKs = [];
 	expect(await handleHookEvent(postTool("off"), off)).toBeNull();
-	expect(state.toolCallsSince("off")).toBe(Number.POSITIVE_INFINITY);
+	expect(spy.topKs).toEqual([]);
+});
+
+test("a store that cannot recall costs the thought, not the hook", async () => {
+	class DownStore extends FakeStore {
+		override async recall(): Promise<never> {
+			throw new Error("store down");
+		}
+	}
+	const warnings: string[] = [];
+	const output = await handleHookEvent(postTool("down"), {
+		...eager(),
+		store: new DownStore(),
+		onWarning: (message) => warnings.push(message),
+	});
+	expect(output).toBeNull();
+	expect(warnings).toEqual(["dmn: intrusive recall failed: store down"]);
 });
 
 test("stop without a transcript, or with an empty one, does nothing", async () => {
@@ -208,13 +236,4 @@ test("a store that cannot resolve cited ids costs the uses, not the retention", 
 	expect(state.uses("abc").useCount).toBe(0);
 	expect((await down.listTags("generic")).map(({ tag }) => tag)).toContain("kind:turn");
 	expect(warnings.join("\n")).toContain("cannot resolve cited id abc: store down");
-});
-
-test("a post-tool event recalls three candidates, not the prompt-time ten", async () => {
-	const spy = new RecallSpyStore();
-	await handleHookEvent(
-		event({ hook_event_name: "PostToolUse", session_id: "top-k", tool_name: "Read" }),
-		{ ...deps, store: spy },
-	);
-	expect(spy.topKs).toEqual([3]);
 });

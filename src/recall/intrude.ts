@@ -11,10 +11,12 @@ import type { RankedMemory } from "./rerank.js";
 const intrusionTopK = 3;
 
 const wordPattern = /[\p{L}\p{N}]+/gu;
-const maximumCommandWords = 3;
-const maximumWordLength = 24;
-/** A command word that is a plain name: no flag, assignment, path or URL, so no place for a secret. */
-const plainCommandWord = /^[A-Za-z][A-Za-z0-9_.-]*$/;
+const maximumNameLength = 24;
+const maximumSubcommandLength = 12;
+/** A command's name is plain: no flag, assignment, path or URL. */
+const commandName = /^[A-Za-z][A-Za-z0-9_.-]*$/;
+/** A subcommand is letters only: a token or a password has digits or dashes more often than not. */
+const subcommand = /^[a-z]+$/;
 
 /** Words of a path: its basename (extension dropped) and its parent directory's name. */
 function pathWords(path: string): string[] {
@@ -23,15 +25,12 @@ function pathWords(path: string): string[] {
 	return [...name.matchAll(wordPattern), ...parent.matchAll(wordPattern)].map(([word]) => word);
 }
 
-/** The first plain words of a command; stops at the first argument that is not one. */
+/** The command name and at most one lowercase subcommand: no argument that could be a secret. */
 function commandWords(command: string): string[] {
-	const words: string[] = [];
-	for (const word of command.trim().split(/\s+/)) {
-		if (words.length === maximumCommandWords) break;
-		if (!plainCommandWord.test(word) || word.length > maximumWordLength) break;
-		words.push(word);
-	}
-	return words;
+	const [name, next] = command.trim().split(/\s+/);
+	if (!name || !commandName.test(name) || name.length > maximumNameLength) return [];
+	if (next && subcommand.test(next) && next.length <= maximumSubcommandLength) return [name, next];
+	return [name];
 }
 
 /**
@@ -64,13 +63,21 @@ export function intrusionCue(
 export interface IntrusionDecisionInput {
 	/** Candidates ranked by activation, best first. */
 	ranked: ReadonlyArray<RankedMemory>;
-	config: Pick<Config, "intrusionThreshold" | "intrusionCooldown">;
+	config: IntrusionRule;
+	/** The decision draw. */
 	random: () => number;
 	/** Tool calls since the last intrusion, not counting this one. */
 	toolCallsSinceLast: number;
 }
 
-/** The top candidate when the cooldown is over and its retrieval probability wins the draw. */
+type IntrusionRule = Pick<Config, "intrusionThreshold" | "intrusionCooldown">;
+
+/** Whether a call may surface a thought at all: the path is on and the cooldown is over. */
+export function isEligible(config: IntrusionRule, toolCallsSinceLast: number): boolean {
+	return config.intrusionThreshold !== null && toolCallsSinceLast >= config.intrusionCooldown;
+}
+
+/** The top candidate when the call is eligible and its retrieval probability wins the draw. */
 export function decideIntrusion({
 	ranked,
 	config,
@@ -78,8 +85,9 @@ export function decideIntrusion({
 	toolCallsSinceLast,
 }: IntrusionDecisionInput): RankedMemory | null {
 	const [top] = ranked;
-	if (!top || config.intrusionThreshold === null) return null;
-	if (toolCallsSinceLast < config.intrusionCooldown) return null;
+	if (!top || config.intrusionThreshold === null || !isEligible(config, toolCallsSinceLast)) {
+		return null;
+	}
 	return retrievalProbability(top.activation, config.intrusionThreshold) > random() ? top : null;
 }
 
@@ -92,13 +100,17 @@ export interface IntrudeInput {
 	toolName: string;
 	toolInput: unknown;
 	onFanError?: (bank: string, error: unknown) => void;
+	/** Activation noise of the recall. */
 	random?: () => number;
+	/** The decision draw; defaults to `random`. */
+	draw?: () => number;
 	now?: Date;
 }
 
 /**
  * Counts the tool call, and when the cooldown is over runs the prompt-time recall for the tool's
- * target and decides. An emission restarts the cooldown. It is not a use: only a citation counts.
+ * target and decides. The caller restarts the cooldown once it prints something. It is not a use:
+ * only a citation counts.
  */
 export async function intrude({
 	store,
@@ -110,13 +122,12 @@ export async function intrude({
 	toolInput,
 	onFanError,
 	random = Math.random,
+	draw = random,
 	now = new Date(),
 }: IntrudeInput): Promise<RankedMemory | null> {
 	const toolCallsSinceLast = state.toolCallsSince(sessionId);
 	state.bumpToolCalls(sessionId);
-	if (config.intrusionThreshold === null || toolCallsSinceLast < config.intrusionCooldown) {
-		return null;
-	}
+	if (!isEligible(config, toolCallsSinceLast)) return null;
 	const target = intrusionCue(cue, toolName, toolInput);
 	const ranked = await recall({
 		store,
@@ -128,7 +139,5 @@ export async function intrude({
 		now,
 		...(onFanError && { onFanError }),
 	});
-	const memory = decideIntrusion({ ranked, config, random, toolCallsSinceLast });
-	if (memory) state.markIntrusion(sessionId);
-	return memory;
+	return decideIntrusion({ ranked, config, random: draw, toolCallsSinceLast });
 }

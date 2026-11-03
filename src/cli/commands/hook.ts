@@ -1,3 +1,4 @@
+import { intrusionDraw, intrusionNoise, seededRandom } from "../../activation/random.js";
 import { ConfigError, createStore, loadConfig, openState } from "../../config/config.js";
 import {
 	HookEventError,
@@ -12,18 +13,6 @@ const eventBySubcommand: Record<string, HookEventName> = {
 	"post-tool": "PostToolUse",
 	stop: "Stop",
 };
-
-/** Small seeded generator (mulberry32) so a session's noise is stable and tests are exact. */
-export function seededRandom(seed: string): () => number {
-	let state = 2166136261;
-	for (const character of seed) state = Math.imul(state ^ character.charCodeAt(0), 16777619);
-	return () => {
-		state = (state + 0x6d2b79f5) | 0;
-		let value = Math.imul(state ^ (state >>> 15), 1 | state);
-		value = (value + Math.imul(value ^ (value >>> 7), 61 | value)) ^ value;
-		return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
-	};
-}
 
 async function readStdin(): Promise<string> {
 	const chunks: Buffer[] = [];
@@ -63,6 +52,7 @@ export async function runHook(
 		const now = env.DMN_NOW ? new Date(env.DMN_NOW) : undefined;
 		if (now && Number.isNaN(now.getTime())) throw new Error("DMN_NOW is not an ISO date");
 		// Under DMN_NOW the use stamps follow the same clock as recall.
+		const seed = env.DMN_SEED ?? event.sessionId;
 		const state = await openState(config, now && (() => now));
 		try {
 			const output = await handleHookEvent(event, {
@@ -70,7 +60,13 @@ export async function runHook(
 				state,
 				config,
 				// DMN_SEED is for tests; otherwise a session's noise is stable per session id.
-				random: seededRandom(env.DMN_SEED ?? event.sessionId),
+				random: seededRandom(seed),
+				// Each tool call draws on its own: a fresh process would replay the session's draws.
+				...(event.name === "PostToolUse" &&
+					event.toolUseId && {
+						random: intrusionNoise(seed, event.toolUseId),
+						draw: () => intrusionDraw(seed, event.toolUseId as string),
+					}),
 				// DMN_NOW (ISO date) is for tests, next to DMN_SEED.
 				...(now && { now }),
 				onWarning: (message) => process.stderr.write(`${message}\n`),
