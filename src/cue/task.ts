@@ -4,7 +4,7 @@ const editTools = new Set(["Edit", "Write", "MultiEdit"]);
 const readTools = new Set(["Read", "Grep", "Glob"]);
 
 /** Tool name of a `recentTools` entry; entries are `Name` or `Name:input`. */
-export function toolName(entry: string): string {
+function toolName(entry: string): string {
 	const colon = entry.indexOf(":");
 	return colon === -1 ? entry : entry.slice(0, colon);
 }

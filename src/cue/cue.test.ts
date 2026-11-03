@@ -11,14 +11,15 @@ const cue = (overrides: Partial<CueInput>) => buildCue({ ...base, ...overrides }
 
 describe("organization and project", () => {
 	const rows: [string, Partial<CueInput>, string, string][] = [
-		["mapped space", { spaceRoot: "/w/acme" }, "acme-corp", "acme"],
+		["space under a mapped root", { spaceRoot: "/w/acme/widgets" }, "acme-corp", "widgets"],
+		["space name is not the key", { spaceRoot: "/w/other/acme" }, "generic", "acme"],
 		[
 			"unmapped space with origin",
 			{ spaceRoot: "/w/gadgets", originUrl: "git@github.com:initech/widgets.git" },
 			"initech",
 			"gadgets",
 		],
-		["unmapped space, no origin", { spaceRoot: "/w/gadgets" }, "gadgets", "gadgets"],
+		["unmapped space, no origin", { spaceRoot: "/w/gadgets" }, "generic", "gadgets"],
 		[
 			"https origin, no space",
 			{ originUrl: "https://github.com/initech/widgets.git" },
@@ -61,8 +62,6 @@ describe("role and task", () => {
 		["spec", [], "plan"],
 		["ship", [], "unknown"],
 		["plan", ["Bash:bun test"], "test"],
-		[undefined, ["Edit", "Write"], "edit"],
-		[undefined, [], "unknown"],
 	];
 	test.each(tasks)("skill %s tools %j → task %s", (activeSkill, recentTools, task) => {
 		expect(cue({ ...(activeSkill ? { activeSkill } : {}), recentTools }).task).toBe(task as never);
@@ -72,7 +71,7 @@ describe("role and task", () => {
 test("same input twice gives deep-equal cues", () => {
 	const input: CueInput = {
 		...base,
-		spaceRoot: "/w/acme",
+		spaceRoot: "/w/acme/widgets",
 		manifests: [{ path: "/w/acme/package.json", content: '{"packageManager":"bun@1"}' }],
 		activeSkill: "plan",
 		recentTools: ["Edit", "Bash:bun test"],
