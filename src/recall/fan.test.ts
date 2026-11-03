@@ -54,5 +54,10 @@ test("sums per-tag counts across banks; the TTL spares the store, expiry hits it
 
 test("a failing listTags contributes nothing instead of rejecting", async () => {
 	const failing = { listTags: () => Promise.reject(new Error("down")) };
-	expect(await fanCounts(failing, state, ["unseen-bank"], 300)).toEqual(new Map());
+	const reported: string[] = [];
+	const counts = await fanCounts(failing, state, ["unseen-bank"], 300, (bank) =>
+		reported.push(bank),
+	);
+	expect(counts).toEqual(new Map());
+	expect(reported).toEqual(["unseen-bank"]);
 });

@@ -68,22 +68,9 @@ test("the same seeded random gives the same order, and components add up", () =>
 		rerank(candidates, cue, new Map(), { state: stateWith({}), random: seeded(), now });
 	const first = run();
 	expect(run().map((m) => m.id)).toEqual(first.map((m) => m.id));
+	// Pins the noise term of A = B + S + ε; the literal test below runs with zero noise.
 	for (const m of first) expect(m.activation).toBeCloseTo(m.baseLevel + m.spreading + m.noise, 10);
 	expect(first.some((m) => m.noise !== 0)).toBe(true);
-});
-
-test("age falls back to the state's firstSeenAt when the record has no createdAt", () => {
-	const [ranked] = rerank([memory("x", "", [])], cue, new Map(), {
-		state: stateWith({}, { x: daysAgo(100) }),
-		random: middle,
-		now,
-	});
-	const [fresh] = rerank([memory("y", daysAgo(0), [])], cue, new Map(), {
-		state: stateWith({}),
-		random: middle,
-		now,
-	});
-	expect(ranked?.baseLevel).toBeLessThan(fresh?.baseLevel ?? 0);
 });
 
 test("components for one candidate match hand-computed values", () => {
@@ -99,9 +86,11 @@ test("components for one candidate match hand-computed values", () => {
 	expect(ranked?.activation).toBeCloseTo(ranked?.baseLevel ?? Number.NaN, 10);
 });
 
-test("an unparseable createdAt falls back to firstSeenAt", () => {
+test("an empty or unparseable createdAt falls back to firstSeenAt", () => {
 	const options = { state: stateWith({}, { x: daysAgo(100) }), random: middle, now };
-	const [bad] = rerank([memory("x", "not a date", [])], cue, new Map(), options);
 	const [good] = rerank([memory("x", daysAgo(100), [])], cue, new Map(), options);
-	expect(bad?.baseLevel).toBeCloseTo(good?.baseLevel ?? Number.NaN, 10);
+	for (const createdAt of ["", "not a date"]) {
+		const [ranked] = rerank([memory("x", createdAt, [])], cue, new Map(), options);
+		expect(ranked?.baseLevel).toBeCloseTo(good?.baseLevel ?? Number.NaN, 10);
+	}
 });
