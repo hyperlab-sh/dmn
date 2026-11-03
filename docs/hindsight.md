@@ -35,10 +35,10 @@ HINDSIGHT_CLAUDE_DIR=$HOME/.claude
 
 Script-level variables, also read from the env file but not passed to the container:
 
-| Variable               | Meaning                                                                                                                | Default                 |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| `HINDSIGHT_CLAUDE_DIR` | The default login route: a directory mounted read-write at `/home/hindsight/.claude` (see the warning under providers) | unset                   |
-| `HINDSIGHT_HOST_URL`   | Base URL `status` probes                                                                                               | `http://127.0.0.1:8888` |
+| Variable               | Meaning                                                                                                                                | Default                 |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `HINDSIGHT_CLAUDE_DIR` | Directory mounted read-write at `/home/hindsight/.claude`; set it to use the recommended login route (see the warning under providers) | unset                   |
+| `HINDSIGHT_HOST_URL`   | Base URL `status` probes                                                                                                               | `http://127.0.0.1:8888` |
 
 The script forwards only `HINDSIGHT_API_*` variables to the container.
 
