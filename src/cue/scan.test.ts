@@ -63,6 +63,25 @@ test("Bash command text never reaches recentTools", () => {
 	expect(result.recentTools).toEqual(["Bash", "Bash:test"]);
 });
 
+test("slash commands typed by the user set the active skill", () => {
+	const typed = JSON.stringify({
+		type: "user",
+		message: {
+			role: "user",
+			content: "<command-message>ship</command-message>\n<command-name>/ship</command-name>",
+		},
+	});
+	const blocks = JSON.stringify({
+		type: "user",
+		message: {
+			role: "user",
+			content: [{ type: "text", text: "<command-name>/land</command-name>" }],
+		},
+	});
+	expect(scanTranscript([typed], "typed.jsonl").activeSkill).toBe("ship");
+	expect(scanTranscript([blocks], "blocks.jsonl").activeSkill).toBe("land");
+});
+
 test("a slash command quoted in a tool result is not an active skill", () => {
 	const quoted = JSON.stringify({
 		type: "user",

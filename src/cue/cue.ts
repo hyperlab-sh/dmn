@@ -45,8 +45,8 @@ const taskBySkill: Record<string, Task> = {
 
 /** Repository name (any host) and, for GitHub remotes only, the owner. */
 function parseOrigin(url: string): { owner?: string; repo: string } | undefined {
-	const github = /github\.com[:/]+([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/.exec(url.trim());
-	if (github?.[1] && github[2]) return { owner: github[1], repo: github[2] };
+	const github = /(?:^|[@/])github\.com[:/]+([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/.exec(url.trim());
+	if (github?.[1] && github[2]) return { owner: github[1].toLowerCase(), repo: github[2] };
 	const repo = /([^/:\s]+?)(?:\.git)?\/?$/.exec(url.trim())?.[1];
 	return repo ? { repo } : undefined;
 }

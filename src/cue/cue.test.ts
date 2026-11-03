@@ -33,6 +33,18 @@ describe("organization and project", () => {
 			"generic",
 			"y",
 		],
+		[
+			"host merely ending in github.com",
+			{ originUrl: "https://notgithub.com/a/b" },
+			"generic",
+			"b",
+		],
+		[
+			"owner is lowercased",
+			{ originUrl: "git@github.com:Initech/Widgets.git" },
+			"initech",
+			"Widgets",
+		],
 		["windows separators", { spaceRoot: "C:\\w\\acme\\widgets" }, "acme-corp", "widgets"],
 		[
 			"root named like an Object member",
