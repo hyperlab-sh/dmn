@@ -11,17 +11,18 @@ export DMN_STORE_URL=http://your-hindsight:8888    # or pass --store
 dmn replay ~/.claude/projects/<project>/<session>.jsonl [more.jsonl ...] [--top 5]
 ```
 
-| Option                 | Meaning                                                                                                                                                                                  |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--store fake\|<url>`  | `fake` seeds an in-process store from `--memories`; a URL is a real Hindsight. Falls back to `DMN_STORE_URL`.                                                                            |
-| `--memories <json>`    | Memories for the fake store: `[{bank, tags, text, createdAt?}]`. Default `fixtures/replay/memories.json`, relative to the current directory, so run from a checkout; otherwise an error. |
-| `--manifests <dir>`    | Directory whose `package.json`, `tsconfig.json`, `Cargo.toml`, `pyproject.toml` give the cue's stack.                                                                                    |
-| `--out <dir>`          | Where run directories go. Default: the `replayDir` config key.                                                                                                                           |
-| `--top <n>`            | List length and the `n` of precision@n. Default 5.                                                                                                                                       |
-| `--judge fake\|laya`   | Adds a third order, `activation+judge` (below). Only this flag does: a configured provider alone makes no replay call the network. `--threshold <p>` overrides `judge.threshold`.        |
-| `--as-live`            | Replay time instead of reading a seeded store (below). Every prompt line must carry a timestamp; a prompt without one exits 2 naming the file and index.                                 |
-| `--measure-from <iso>` | With `--as-live`: prompts before this time are retained only — seeding, never measured.                                                                                                  |
-| `--uses judged\|none`  | With `--as-live`: the use signal (below). `judged` (the default) needs `--judge`; `none` records nothing, for an ablation.                                                               |
+| Option                           | Meaning                                                                                                                                                                                  |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--store fake\|<url>`            | `fake` seeds an in-process store from `--memories`; a URL is a real Hindsight. Falls back to `DMN_STORE_URL`.                                                                            |
+| `--memories <json>`              | Memories for the fake store: `[{bank, tags, text, createdAt?}]`. Default `fixtures/replay/memories.json`, relative to the current directory, so run from a checkout; otherwise an error. |
+| `--manifests <dir>`              | Directory whose `package.json`, `tsconfig.json`, `Cargo.toml`, `pyproject.toml` give the cue's stack.                                                                                    |
+| `--out <dir>`                    | Where run directories go. Default: the `replayDir` config key.                                                                                                                           |
+| `--top <n>`                      | List length and the `n` of precision@n. Default 5.                                                                                                                                       |
+| `--judge fake\|laya`             | Adds a third order, `activation+judge` (below). Only this flag does: a configured provider alone makes no replay call the network. `--threshold <p>` overrides `judge.threshold`.        |
+| `--as-live`                      | Replay time instead of reading a seeded store (below). Every prompt line must carry a timestamp; a prompt without one exits 2 naming the file and index.                                 |
+| `--measure-from <iso>`           | With `--as-live`: prompts before this time are retained only — seeding, never measured.                                                                                                  |
+| `--uses judged\|none`            | With `--as-live`: the use signal (below). `judged` (the default) needs `--judge`; `none` records nothing, for an ablation.                                                               |
+| `--max-consecutive-failures <n>` | With `--as-live`: stop the walk after `n` prompts in a row whose store calls failed (default 5; below).                                                                                  |
 
 Each run writes `<out>/run-<timestamp>/report.md`, `judgements.json`, and the texts `replay judge`
 needs: `memories.json` (`{id: text}` of every shown memory) and `prompts.json` (`{number: prompt}`). `prompts.json` holds the full text of your prompts, so
@@ -34,7 +35,9 @@ records the run's `top:`, and `replay score` uses it. The harness only reads the
 afterwards.
 
 For reproducible output set `DMN_SEED` (any string, seeds the activation noise) and `DMN_NOW`
-(an ISO date, the clock). Two runs with the same inputs are byte-identical.
+(an ISO date, the clock). Two runs with the same inputs are byte-identical. A run directory that
+already exists is never overwritten (exit 2, checked before the replay starts) — with one
+exception: the run a resumed as-live walk rewrites over its checkpoint (below).
 
 ## Judge by hand
 
@@ -164,6 +167,61 @@ earlier prompts; pass `--memories <json>` to start from a chosen set anyway. The
 is still a scratch directory, deleted afterwards. For reproducibility set
 `DMN_SEED` and `DMN_NOW` as usual: `DMN_NOW` names the run directory only — every recorded
 age, use and dormancy decision inside the walk comes from the prompts' own timestamps.
+
+## Resuming a walk
+
+A full walk over months of transcripts re-extracts every prompt; a measurement built in steps
+should not pay that twice. An as-live run therefore keeps a checkpoint in its `--out`
+directory — `checkpoint.json`, rewritten after every prompt: which prompts were seeded and
+which measured (keyed `<basename>:<index>`), the measured entries so far, and the settings the
+walk was made with. Run the same command again with the same `--out` and the walk resumes:
+
+- **What is skipped.** Every checkpointed prompt is never recalled, judged or retained again;
+  the rest walk in timestamp order as usual, and the report is written over all entries of
+  every run into that `--out`, merged in timestamp order. The header's `seeded:` is the total
+  over all runs. A run directory the resumed walk writes already exists is rewritten — the one
+  exception to "never overwritten"; an `--out` whose run directory exists but holds no checkpoint
+  (a plain run's, say) still exits 2.
+- **What must match.** The checkpoint's `--measure-from`, `--uses` and `--top` are what it was
+  made with; resuming with anything else is a usage error (exit 2) before a single turn is
+  retained. Adding transcripts is the point: a longer walk extends the previous one's store
+  instead of rebuilding it. Point `--store` at the same Hindsight as the first run.
+- **Out-of-order prompts.** A resumed walk that retains a prompt older than the last
+  checkpointed prompt gets one `warnings` line per such prompt:
+  `out of order: <transcript>#<index> (<iso>) is older than the checkpoint (<iso>); measurements
+  before it did not see it`. The store still gets the prompt's turns; the warning says the
+  earlier measurements were not as-live for that memory.
+- **What does not carry over.** Use counts, co-use edges and dormancy live in the run's scratch
+  state, deleted afterwards: a resumed walk starts them empty and records no use for
+  checkpointed prompts, so activation numbers in the resumed run are computed without the
+  earlier runs' reinforcement.
+- **Progress.** The walk prints one line to stderr every 25 walked prompts and when a
+  transcript completes:
+  `progress <done>/<total> prompts, <seeded> seeded, <measured> measured, <failed> failed,
+  <mm:ss> elapsed` — every count of the current invocation, `<total>` its remaining walk.
+  Warnings also appear in the report under `warnings:` next to the header.
+
+## When the store stops answering
+
+The walk distinguishes a bad prompt from a dead store:
+
+- **A failed retain** (a store error, a timeout, an HTTP 4xx/5xx from Hindsight) is reported
+  as a warning — `retain failed <transcript>#<index>: <message>` — and the walk continues with
+  the next prompt; later prompts recall everything retained before the failure. dmn never
+  retries a failed retain: the retry policy is Hindsight's own.
+- **A failed recall** (a store error, a timeout) costs that prompt's measurement — one warning,
+  `recall failed <transcript>#<index>: <message>`, no entry for the prompt — and nothing else:
+  the prompt's turns are still retained, so the next prompt recalls them. A single failed
+  recall between successful prompts does not stop the walk.
+- **The stop.** A prompt whose retain or recall failed counts as failed; after
+  `--max-consecutive-failures <n>` (default 5) failed prompts in a row the walk stops — a
+  depleted or dead provider costs a few prompts, not hours of judge credit. The checkpoint and
+  a report of everything measured so far are written, the exit code is 1, and one stderr line
+  names the count and the last error: `stopped after <n> consecutive failures: <message>`.
+  Recalls that succeed between failing prompts do not reset the count: a store that only
+  retains badly still stops the walk. Fix the store and rerun the same command: the walk
+  resumes from the checkpoint. A prompt whose recall failed is not checkpointed as measured,
+  so a resumed run tries it again.
 
 ## Seed a store from history
 

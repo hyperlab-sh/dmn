@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import type { Config } from "../config/config.js";
 import { buildCue, type Cue, softTags } from "../cue/cue.js";
 import type { Manifest } from "../cue/stack.js";
@@ -39,14 +40,96 @@ export interface ReplayResult {
 	live?: LiveSummary;
 }
 
-/** The as-live header: what the report says about the walk (D36). */
+/** The as-live header: what the report says about the walk (D36, D40). */
 export interface LiveSummary {
 	/** Where the use signal came from. */
 	uses: "judged" | "none";
 	/** ISO time prompts before which were seeding only, or null when every prompt was measured. */
 	measureFrom: string | null;
-	/** Prompts retained before `measureFrom`, never recalled, judged or reported. */
+	/** Prompts retained as seeding over every run into this `--out`, never recalled or reported. */
 	seeded: number;
+	/** Present when the walk stopped on consecutive failures (D40): the checkpoint and report were still written. */
+	stopped?: { failures: number; lastError: string };
+}
+
+/** The as-live walk's checkpoint (D40): what a walk into an `--out` has done so far, so a later
+ * invocation with the same `--out` continues where this one stopped instead of starting over. */
+export interface LiveCheckpoint {
+	version: 1;
+	/** What the walk was made with; resuming with other values is a usage error. */
+	settings: { measureFrom: string | null; uses: "judged" | "none"; top: number };
+	/** ISO time of the last prompt covered: what an out-of-order resumed prompt is older than. */
+	lastAt: string;
+	/** Keys `<basename>:<index>` of the prompts retained as seeding. */
+	seeded: string[];
+	/** Keys `<basename>:<index>` of the prompts measured (an entry exists for each). */
+	measured: string[];
+	/** The entries measured so far, in timestamp order. */
+	entries: ReplayEntry[];
+}
+
+/** Name of the checkpoint file inside the as-live walk's `--out`. */
+export const checkpointFile = "checkpoint.json";
+
+/** A checkpoint dmn cannot resume: corrupt, or written by something else. */
+export class CheckpointError extends Error {
+	constructor(path: string, because: string) {
+		super(`${path}: ${because}; remove it or resume into another --out`);
+		this.name = "CheckpointError";
+	}
+}
+
+/** The checkpoint of one walk, as serialized in `--out`. */
+export function formatCheckpoint(checkpoint: LiveCheckpoint): string {
+	return `${JSON.stringify(checkpoint, null, 2)}\n`;
+}
+
+/** Reads a checkpoint, refusing anything dmn did not write: a silently truncated resume would
+ * re-walk a store the operator already paid for. */
+export function parseCheckpoint(raw: string, path: string): LiveCheckpoint {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		throw new CheckpointError(path, "not valid JSON");
+	}
+	const bad = (because: string): never => {
+		throw new CheckpointError(path, because);
+	};
+	if (typeof parsed !== "object" || parsed === null) bad("not a checkpoint");
+	const record = parsed as Record<string, unknown>;
+	if (record.version !== 1) bad(`version ${JSON.stringify(record.version)} is not 1`);
+	const settings = record.settings;
+	if (typeof settings !== "object" || settings === null) bad("no settings");
+	const { measureFrom, uses, top } = settings as Record<string, unknown>;
+	if (measureFrom !== null && typeof measureFrom !== "string")
+		bad("settings.measureFrom is not a time");
+	if (uses !== "judged" && uses !== "none") bad("settings.uses is not judged or none");
+	if (typeof top !== "number" || !Number.isInteger(top) || top < 1)
+		bad("settings.top is not a positive integer");
+	if (typeof record.lastAt !== "string" || Number.isNaN(Date.parse(record.lastAt)))
+		bad("lastAt is not a time");
+	const isKeyList = (value: unknown): value is string[] =>
+		Array.isArray(value) && value.every((key) => typeof key === "string");
+	if (!isKeyList(record.seeded)) bad("seeded is not a list of prompt keys");
+	if (!isKeyList(record.measured)) bad("measured is not a list of prompt keys");
+	if (
+		!Array.isArray(record.entries) ||
+		!record.entries.every(
+			(entry) =>
+				typeof entry === "object" &&
+				entry !== null &&
+				typeof (entry as { prompt?: { at?: unknown } }).prompt?.at === "string",
+		)
+	)
+		bad("entries is not a list of measured entries");
+	return parsed as LiveCheckpoint;
+}
+
+/** Writes a checkpoint, creating `--out` on the first prompt of a fresh walk (D40). */
+export function writeCheckpoint(path: string, checkpoint: LiveCheckpoint): void {
+	mkdirSync(dirname(path), { recursive: true });
+	writeFileSync(path, formatCheckpoint(checkpoint));
 }
 
 /** The as-live walk's settings (D36). */
@@ -59,6 +142,14 @@ export interface LiveOptions {
 	judge?: Judge;
 	/** Set to each prompt's time before every step, so state stamps carry the replayed clock. */
 	clock: { set(now: Date): void };
+	/** The walk stops after this many prompts in a row with a failed retain or recall (D40). */
+	maxConsecutiveFailures?: number;
+	/** The checkpoint resumed from, when `--out` already holds one: its prompts are skipped (D40). */
+	checkpoint?: LiveCheckpoint;
+	/** Called with the checkpoint after every walked prompt; the caller persists it (D40). */
+	onCheckpoint?: (checkpoint: LiveCheckpoint) => void;
+	/** Sees one line every 25 walked prompts and when a transcript completes (D40). */
+	onProgress?: (line: string) => void;
 }
 
 export interface ReplayOptions {
@@ -241,12 +332,25 @@ interface LiveRunInput {
 	entries: ReplayEntry[];
 }
 
+/** One prompt of the walk, keyed the way the checkpoint and the retain documents key it. */
+const promptKey = (prompt: ReplayPrompt) => `${prompt.file ?? "transcript"}:${prompt.index}`;
+
+/** `mm:ss` since the walk started, for the progress line (D40). */
+function elapsedSince(startedAt: number): string {
+	const seconds = Math.floor((Date.now() - startedAt) / 1000);
+	return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
 /**
- * The as-live walk (D36): prompts in timestamp order with the clock set to each one's time.
+ * The as-live walk (D36, D40): prompts in timestamp order with the clock set to each one's time.
  * Recall at prompt N sees only what was retained before N; after the prompt is reported its
  * turns are retained with its timestamp, as the Stop hook would have; the sweep runs when the
  * replayed calendar day (UTC) changes and once more after the last prompt. Prompts before
- * `measureFrom` seed the store only, never measured.
+ * `measureFrom` seed the store only, never measured. A checkpoint in `live` resumes the walk:
+ * its prompts are skipped — never recalled, judged or retained again — and its entries are
+ * reported beside the new ones. A prompt whose store calls fail costs a warning; after
+ * `maxConsecutiveFailures` failed prompts in a row the walk stops, with the checkpoint and the
+ * entries so far still returned for the report.
  */
 async function runLiveReplay({
 	prompts,
@@ -265,26 +369,79 @@ async function runLiveReplay({
 	if (live.uses === "judged" && !live.judge) throw new Error('live uses "judged" needs a judge');
 	const utcDay = (at: Date) => at.toISOString().slice(0, 10);
 	const sweepBanks = (cue: Cue) => [...new Set([bankFor(cue.organization), bankFor(undefined)])];
+	// The message of the most recent failure, for the stop line (D40).
+	let lastFailure = "";
 	/**
 	 * One prompt's retain; a store that rejects it (an error, a timeout, an HTTP 4xx/5xx from
 	 * Hindsight) costs a warning naming the transcript, the prompt index and the message, and
-	 * the walk goes on. Never retried: the retry policy is Hindsight's own (D37).
+	 * the walk goes on. Never retried: the retry policy is Hindsight's own (D37). Returns
+	 * whether the retain landed, for the consecutive-failure counter (D40).
 	 */
-	const retainOrWarn = (prompt: ReplayPrompt, cue: Cue, at: Date) =>
-		retainPrompt(store, cue, prompt, prompt.answer ?? "", at).catch((error: unknown) => {
-			warnings.push(
-				`retain failed ${prompt.file ?? "transcript"}#${prompt.index}: ${(error as Error).message}`,
-			);
+	const retainOrWarn = async (prompt: ReplayPrompt, cue: Cue, at: Date): Promise<boolean> =>
+		await retainPrompt(store, cue, prompt, prompt.answer ?? "", at).then(
+			() => true,
+			(error: unknown) => {
+				lastFailure = (error as Error).message;
+				warnings.push(
+					`retain failed ${prompt.file ?? "transcript"}#${prompt.index}: ${lastFailure}`,
+				);
+				return false;
+			},
+		);
+	// The walk resumed from (D40): its prompts are done and its entries come first.
+	const checkpoint = live.checkpoint;
+	const seededKeys = new Set(checkpoint?.seeded ?? []);
+	const measuredKeys = new Set(checkpoint?.measured ?? []);
+	const checkpointedKeys = new Set([...seededKeys, ...measuredKeys]);
+	if (checkpoint) entries.push(...checkpoint.entries);
+	// What the resumed prompts already covered: a prompt walked now that is older than this was
+	// never seen by the measurements before it, which the warning says (D40).
+	const checkpointAt = checkpoint ? new Date(checkpoint.lastAt) : undefined;
+	// Progress and failure accounting (this invocation only, D40): the line shows the run moving.
+	const limit = live.maxConsecutiveFailures ?? 5;
+	const startedAt = Date.now();
+	const remaining = prompts.filter((prompt) => !checkpointedKeys.has(promptKey(prompt))).length;
+	let done = 0;
+	let seededThisRun = 0;
+	let measuredThisRun = 0;
+	let failedThisRun = 0;
+	let consecutiveFailed = 0;
+	let stopped: { failures: number; lastError: string } | undefined;
+	// A transcript's boundary is its last prompt in the merged walk: the line marks it finished.
+	const lastIndexOf = new Map<string, number>();
+	prompts.forEach((prompt, index) => {
+		lastIndexOf.set(prompt.file ?? "transcript", index);
+	});
+	const emitProgress = () =>
+		live.onProgress?.(
+			`progress ${done}/${remaining} prompts, ${seededThisRun} seeded, ${measuredThisRun} measured, ${failedThisRun} failed, ${elapsedSince(startedAt)} elapsed`,
+		);
+	const saveCheckpoint = (lastWalked: Date) =>
+		live.onCheckpoint?.({
+			version: 1,
+			settings: { measureFrom: live.measureFrom?.toISOString() ?? null, uses: live.uses, top },
+			lastAt: lastWalked.toISOString(),
+			seeded: [...seededKeys],
+			measured: [...measuredKeys],
+			entries,
 		});
 	let lastDay: string | undefined;
-	let seeded = 0;
-	let lastAt = now;
+	let lastWalkedAt = now;
+	// The furthest time any run into this `--out` has walked to: what the next checkpoint says.
+	let furthest = checkpointAt;
 	let lastCue: Cue | undefined;
-	for (const prompt of prompts) {
+	for (const [position, prompt] of prompts.entries()) {
 		const at = new Date(prompt.at);
 		if (Number.isNaN(at.getTime()))
 			throw new Error(`prompt ${prompt.index} has no usable timestamp`);
-		lastAt = at;
+		const key = promptKey(prompt);
+		if (checkpointedKeys.has(key)) continue;
+		if (checkpointAt !== undefined && at < checkpointAt) {
+			warnings.push(
+				`out of order: ${prompt.file ?? "transcript"}#${prompt.index} (${at.toISOString()}) is older than the checkpoint (${checkpointAt.toISOString()}); measurements before it did not see it`,
+			);
+		}
+		if (furthest === undefined || at > furthest) furthest = at;
 		live.clock.set(at);
 		// The recorded directory may not exist here, so no scan: only what the transcript says.
 		const cue = buildCue({
@@ -295,50 +452,93 @@ async function runLiveReplay({
 			organizations: config.organizations,
 		});
 		lastCue = cue;
+		lastWalkedAt = at;
 		if (lastDay !== undefined && utcDay(at) !== lastDay) {
 			// The sweep of the night the replayed clock crossed into this day.
 			await sweep({ store, state, config, banks: sweepBanks(cue), now: at });
 		}
 		lastDay = utcDay(at);
+		// A prompt fails when any of its store calls failed: recalls that succeed between failing
+		// prompts do not reset the run, so a provider that only retains badly still stops the walk.
+		let failed = false;
 		if (live.measureFrom !== undefined && at < live.measureFrom) {
 			// Seeding: retained with its own time, never recalled, judged or reported. The prompt
 			// counts as seeded whatever its retain does — a failure is a warning, not a shorter walk.
-			seeded += 1;
-			await retainOrWarn(prompt, cue, at);
-			continue;
+			seededKeys.add(key);
+			seededThisRun += 1;
+			if (!(await retainOrWarn(prompt, cue, at))) failed = true;
+		} else {
+			let entry: ReplayEntry | undefined;
+			try {
+				entry = await measurePrompt({
+					cue,
+					prompt,
+					store,
+					state,
+					config,
+					top,
+					random,
+					now: at,
+					gate,
+					number: entries.length + 1,
+					warnings,
+				});
+			} catch (error) {
+				// A recall the store could not answer (a store error, a timeout) costs this prompt's
+				// measurement — a warning, no entry — but not the walk: its turns are still retained
+				// below, so the next prompt recalls them (D40).
+				lastFailure = (error as Error).message;
+				failed = true;
+				warnings.push(
+					`recall failed ${prompt.file ?? "transcript"}#${prompt.index}: ${lastFailure}`,
+				);
+			}
+			if (entry) {
+				entries.push(entry);
+				measuredKeys.add(key);
+				measuredThisRun += 1;
+				if (live.uses === "judged" && live.judge) {
+					await recordJudgedUses(
+						state,
+						live.judge,
+						config.judge.threshold,
+						recallQuery(prompt.text, entry.cue),
+						entry.activation,
+						entry.cue.project,
+						`live:${prompt.file ?? "transcript"}:${prompt.index}`,
+						(error) => warnings.push(`judge: ${(error as Error).message}`),
+					);
+				}
+			}
+			// The Stop hook's retain, at the prompt's own time: the next prompt can recall it. A
+			// failed one is reported above and skipped; later prompts recall what did land (D37).
+			if (!(await retainOrWarn(prompt, cue, at))) failed = true;
 		}
-		const entry = await measurePrompt({
-			cue,
-			prompt,
-			store,
-			state,
-			config,
-			top,
-			random,
-			now: at,
-			gate,
-			number: entries.length + 1,
-			warnings,
-		});
-		entries.push(entry);
-		if (live.uses === "judged" && live.judge) {
-			await recordJudgedUses(
-				state,
-				live.judge,
-				config.judge.threshold,
-				recallQuery(prompt.text, entry.cue),
-				entry.activation,
-				entry.cue.project,
-				`live:${prompt.file ?? "transcript"}:${prompt.index}`,
-				(error) => warnings.push(`judge: ${(error as Error).message}`),
-			);
+		done += 1;
+		if (failed) {
+			consecutiveFailed += 1;
+			failedThisRun += 1;
+		} else {
+			consecutiveFailed = 0;
 		}
-		// The Stop hook's retain, at the prompt's own time: the next prompt can recall it. A
-		// failed one is reported above and skipped; later prompts recall what did land (D37).
-		await retainOrWarn(prompt, cue, at);
+		// A line every 25 walked prompts and when a transcript finishes; the checkpoint follows.
+		if (done % 25 === 0 || lastIndexOf.get(prompt.file ?? "transcript") === position)
+			emitProgress();
+		if (furthest !== undefined) saveCheckpoint(furthest);
+		if (consecutiveFailed >= limit) {
+			stopped = { failures: consecutiveFailed, lastError: lastFailure };
+			break;
+		}
 	}
-	// Once more, with the last replayed clock: the run ends like a day a live install swept.
-	if (lastCue) await sweep({ store, state, config, banks: sweepBanks(lastCue), now: lastAt });
+	// Once more, with the last replayed clock: the run ends like a day a live install swept. A
+	// walk stopped on failures did not end its day (D40); the resumed one sweeps on the change.
+	if (!stopped && lastCue)
+		await sweep({ store, state, config, banks: sweepBanks(lastCue), now: lastWalkedAt });
+	// The report is over every entry of this --out, in timestamp order (D40): a resumed older
+	// transcript can land before entries already numbered, so the numbers follow the order.
+	entries.sort((a, b) => Date.parse(a.prompt.at) - Date.parse(b.prompt.at));
+	for (const [index, entry] of entries.entries()) entry.number = index + 1;
+	if (furthest !== undefined) saveCheckpoint(furthest);
 	return {
 		run: runName(now),
 		top,
@@ -347,7 +547,9 @@ async function runLiveReplay({
 		live: {
 			uses: live.uses,
 			measureFrom: live.measureFrom?.toISOString() ?? null,
-			seeded,
+			// Over every run into this --out: the checkpointed seeds and this run's (D40).
+			seeded: seededKeys.size,
+			...(stopped && { stopped }),
 		},
 	};
 }
