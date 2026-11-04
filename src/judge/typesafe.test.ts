@@ -257,6 +257,57 @@ test("a deadline stops the whole call instead of waiting past it", async () => {
 	expect(sleeps).toEqual([]);
 });
 
+test("a deadline spans the item pool: later waves inherit the spent budget", async () => {
+	const sleeps: number[] = [];
+	let clock = 0;
+	// 12 texts force a second wave; every request answers 429 with a long Retry-After.
+	const { recorded, fetcher } = fakeFetch([status(429, { "retry-after": "90" })]);
+	const judge = new TypeSafeJudge({
+		apiKey: "k",
+		fetch: fetcher,
+		sleep: async (ms) => {
+			sleeps.push(ms);
+			clock += ms;
+		},
+		random: () => 0,
+		now: () => clock,
+		deadlineMs: 5000,
+	});
+	const texts = Array.from({ length: 12 }, (_, index) => `text ${index}`);
+	const error = await judge.classify(texts).catch((thrown) => thrown);
+	expect(error).toBeInstanceOf(JudgeError);
+	expect(error.message).toContain("deadline");
+	// The first wave abandoned on the deadline; the queued four never left, and nothing slept.
+	expect(recorded).toHaveLength(8);
+	expect(sleeps).toEqual([]);
+
+	// And when the first wave answered before the budget ran out, the deadline still rejects
+	// the whole call instead of returning the answers it already had (as Laya's batches do).
+	let requests = 0;
+	let slowClock = 0;
+	const slow = (async () => {
+		requests += 1;
+		slowClock += 625; // each answered request costs an eighth of the 5 s budget
+		return okKind();
+	}) as unknown as typeof fetch;
+	const answered = new TypeSafeJudge({
+		apiKey: "k",
+		fetch: slow,
+		sleep: async (ms) => {
+			sleeps.push(ms);
+		},
+		random: () => 0,
+		now: () => slowClock,
+		deadlineMs: 5000,
+	});
+	const spent = await answered.classify(texts).catch((thrown) => thrown);
+	expect(spent).toBeInstanceOf(JudgeError);
+	expect(spent.message).toContain("deadline");
+	// The first wave's eight requests spent the budget; items 8..11 were never sent.
+	expect(requests).toBe(8);
+	expect(sleeps).toEqual([]);
+});
+
 test("no more than 8 requests are in flight at once, and answers come back in input order", async () => {
 	let active = 0;
 	let maxInFlight = 0;

@@ -104,7 +104,8 @@ dmn replay judge <run-dir> --judge typesafe
 - **No batch form.** The endpoint answers one state per request, so dmn sends one request per
   memory with at most 8 in flight. A request that fails — after the same five-attempt retry of
   429 and 503 honouring `Retry-After` — leaves that memory unanswered and judges the rest; a run
-  where every request fails fails like Laya's would.
+  where every request fails fails like Laya's would, and the whole-call deadline (a hook's store
+  limit) rejects the call as Laya's would, never outliving the budget wave after wave.
 - **Cost.** Each request is billed on its `usage.input_tokens` (about one prompt-plus-memory
   per memory), and Jev reads 32k tokens per question — the reason to prefer it on long prompts,
   where a judge that truncates the state never sees the memory it is judging.
