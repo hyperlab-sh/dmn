@@ -86,6 +86,18 @@ afterAll(() => {
 	rmSync(scratch, { recursive: true, force: true });
 });
 
+/** The process's command line once it has exec'd its final binary (polled for up to 3 s). */
+async function commandLine(pid: number): Promise<string> {
+	const deadline = Date.now() + 3000;
+	let last = "";
+	while (Date.now() < deadline) {
+		last = Bun.spawnSync(["ps", "-p", String(pid), "-o", "command="]).stdout.toString();
+		if (last.includes("--host")) return last;
+		await Bun.sleep(25);
+	}
+	return last;
+}
+
 describe("hindsight-host.sh", () => {
 	test("install creates the venv with uv, repeats as a no-op and exits 2 without uv", async () => {
 		const dirs = freshDirs("install");
@@ -126,8 +138,9 @@ describe("hindsight-host.sh", () => {
 		expect(recorded()[0]).toBe(`venv --python 3.12 ${join(dirs.data, "dmn", "hindsight")}`);
 		const pid = Number(readFileSync(pidFile, "utf8"));
 		expect(() => process.kill(pid, 0)).not.toThrow();
-		const ps = Bun.spawnSync(["ps", "-p", String(pid), "-o", "command="]);
-		expect(ps.stdout.toString()).toContain("--host 127.0.0.1 --port 8888");
+		// The child is forked before it execs the api binary; `ps` can still show the shell or
+		// `[nohup]` for a few milliseconds, so wait for the command line to settle.
+		expect(await commandLine(pid)).toContain("--host 127.0.0.1 --port 8888");
 
 		const again = await run("start", { HINDSIGHT_API_LLM_PROVIDER: "claude-code" }, dirs);
 		expect(again.code).toBe(0);
