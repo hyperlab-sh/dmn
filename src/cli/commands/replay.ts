@@ -28,10 +28,10 @@ import type { MemoryStore } from "../../store/types.js";
 
 const usage = `Usage:
   dmn replay <transcript.jsonl>... [--store fake|<url>] [--out <dir>] [--top 5]
-             [--memories <json>] [--manifests <dir>] [--judge fake|laya] [--threshold <p>]
+             [--memories <json>] [--manifests <dir>] [--judge fake|laya|typesafe] [--threshold <p>]
              [--as-live [--measure-from <iso>] [--uses judged|none] [--max-consecutive-failures <n>]]
   dmn replay score <run-dir> [--top 5]
-  dmn replay judge <run-dir> [--threshold <p>] [--judge fake|laya]
+  dmn replay judge <run-dir> [--threshold <p>] [--judge fake|laya|typesafe]
 
 --as-live replays time: prompts walk in timestamp order with the clock set to each one's
   time, turns are retained as the Stop hook would have, and --uses judged (the default;
@@ -52,7 +52,7 @@ interface Options {
 	memories?: string;
 	manifests?: string;
 	threshold?: number;
-	judge?: "fake" | "laya";
+	judge?: "fake" | "laya" | "typesafe";
 	asLive?: boolean;
 	uses?: "judged" | "none";
 	measureFrom?: Date;
@@ -94,8 +94,8 @@ function parseArguments(argv: string[]): Options {
 				break;
 			}
 			case "--judge":
-				if (value !== "fake" && value !== "laya")
-					throw new UsageError("--judge must be fake or laya");
+				if (value !== "fake" && value !== "laya" && value !== "typesafe")
+					throw new UsageError("--judge must be fake, laya or typesafe");
 				options.judge = value;
 				break;
 			case "--uses":
@@ -164,7 +164,7 @@ function scoreCommand(argv: string[]): number {
 
 /** The judge `--judge` names, else the configured one; undefined when neither is set. */
 function judgeFor(
-	flag: "fake" | "laya" | undefined,
+	flag: "fake" | "laya" | "typesafe" | undefined,
 	config: ReturnType<typeof loadConfig>,
 	env: Record<string, string | undefined>,
 ): Judge | undefined {
@@ -185,7 +185,7 @@ async function judgeCommand(argv: string[]): Promise<number> {
 	const judge = judgeFor(options.judge, config, env);
 	if (!judge) {
 		throw new UsageError(
-			'no judge is configured; pass --judge fake|laya or set "judge": {"provider": "laya"} in config.json',
+			'no judge is configured; pass --judge fake|laya|typesafe or set "judge": {"provider": "laya"} in config.json',
 		);
 	}
 	const threshold = options.threshold ?? config.judge.threshold;
@@ -212,7 +212,9 @@ async function replayCommand(argv: string[]): Promise<number> {
 	}
 	const uses = options.uses ?? "judged";
 	if (options.asLive && uses === "judged" && !options.judge) {
-		throw new UsageError("--as-live --uses judged needs --judge fake|laya (or pass --uses none)");
+		throw new UsageError(
+			"--as-live --uses judged needs --judge fake|laya|typesafe (or pass --uses none)",
+		);
 	}
 	const storeOption = options.store ?? process.env.DMN_STORE_URL;
 	if (!storeOption) throw new UsageError("pass --store fake|<url> (or set DMN_STORE_URL)");
