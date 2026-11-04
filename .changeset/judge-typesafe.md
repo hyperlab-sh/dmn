@@ -1,5 +1,0 @@
----
-"@hyperlab.sh/dmn": minor
----
-
-`dmn` has a second usefulness judge provider: TypeSafe's Jev model. Set `"judge": {"provider": "typesafe"}` in config.json (with `TYPESAFE_API_KEY` in the environment) or pass `--judge typesafe` to `dmn replay` and `dmn replay judge`, and the same judgements, classifications and error contracts come back, so nothing downstream changes. The provider posts to `https://api.typesafe.ai/v1/systemone` (`judge.baseUrl` overrides) with `model: "jev-latest"` and the same state text and questions the Laya provider sends — prompt, then memory cut to 1,500 characters, and no ids, tags, directories or organization names. The endpoint has no batch form, so one memory is one request with at most 8 in flight; 429 and 503 retry up to five attempts honouring `Retry-After`, a request that fails leaves its item unanswered while the others stand, and each request is billed on its `usage.input_tokens`. Jev reads 32k tokens per question, so whole prompts are judged where the previous provider truncated every state to 512 input tokens and judged from the head (D43). The default provider stays `none`, and the Laya provider is unchanged.
