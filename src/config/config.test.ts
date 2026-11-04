@@ -169,9 +169,9 @@ test("createJudge: typesafe returns a TypeSafeJudge and needs its own key from t
 	expect(() => createJudge(typesafe, { LAYA_API_KEY: "k" })).toThrow(ConfigError);
 	// The message names the provider's own variable (environment only, no default); the name is
 	// spelled in fragments so the C-6 grep finds the variable only where it is read.
-	expect(() => createJudge(typesafe, {})).toThrow(
-		/_API_KEY is not set; export it to use judge provider "typesafe"/,
-	);
 	const key = `${"typesafe"}_API_KEY`.toUpperCase();
+	expect(() => createJudge(typesafe, {})).toThrow(
+		`${key} is not set; export it to use judge provider "typesafe"`,
+	);
 	expect(createJudge(typesafe, { [key]: "k" })).toBeInstanceOf(TypeSafeJudge);
 });
