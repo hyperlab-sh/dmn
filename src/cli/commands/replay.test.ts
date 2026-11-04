@@ -11,12 +11,23 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { startFakeServer } from "../../store/fake.js";
 import { run as runReplayCommand } from "./replay.js";
 
 const root = new URL("../../..", import.meta.url).pathname;
 let scratch: string;
 let base: string;
 let baseRun: { exitCode: number; stderr: string };
+
+// The walk-ladder fixture (D40): one fake Hindsight whose retains the tests can fail on
+// demand, recording every document it was asked to retain. Cases change `failRetain` inside it.
+let server: ReturnType<typeof startFakeServer>;
+let failRetain: (documentId: string) => boolean = () => false;
+const retainedDocuments: string[] = [];
+
+const liveA = join(root, "fixtures/replay/live-a.jsonl");
+const liveB = join(root, "fixtures/replay/live-b.jsonl");
+const live0 = join(root, "fixtures/replay/live-0.jsonl");
 
 const dmn = (args: string[], extraEnv: Record<string, string> = {}) => {
 	const { DMN_STORE_URL: _ignored, ...env } = process.env;
@@ -56,8 +67,17 @@ beforeAll(() => {
 	]);
 	baseRun = { exitCode: run.exitCode, stderr: run.stderr.toString() };
 	base = join(out, readdirSync(out)[0] as string);
+	server = startFakeServer({
+		failRetainOn: (body) => {
+			retainedDocuments.push(...body.items.map((item) => item.document_id ?? ""));
+			return body.items.some((item) => failRetain(item.document_id ?? ""));
+		},
+	});
 });
-afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+afterAll(() => {
+	server.stop();
+	rmSync(scratch, { recursive: true, force: true });
+});
 
 /** Calls the command in-process, capturing what it writes to stdout and stderr (no spawn). */
 async function inProcess(
@@ -119,7 +139,9 @@ test("--as-live exits 2 for a bad flag combination and a bad --measure-from, bef
 
 	const strayFlag = await inProcess(["--store", "fake", "--uses", "none", ...transcripts]);
 	expect(strayFlag.code).toBe(2);
-	expect(strayFlag.stderr).toContain("--uses and --measure-from need --as-live");
+	expect(strayFlag.stderr).toContain(
+		"--uses, --measure-from and --max-consecutive-failures need --as-live",
+	);
 });
 
 test("--as-live exits 2 naming the file and index of a prompt without a timestamp", async () => {
@@ -158,8 +180,9 @@ test("--as-live --store fake starts from an empty store, not the seeded fixtures
 		join(root, "fixtures/replay/live-a.jsonl"),
 		join(root, "fixtures/replay/live-b.jsonl"),
 	]);
-	expect(stderr).toBe("");
 	expect(code).toBe(0);
+	// The walk's only stderr is its progress lines (D40): no warning, no error.
+	expect(stderr.split("\n").filter((line) => line && !line.startsWith("progress "))).toEqual([]);
 	const report = readFileSync(join(out, "run-2026-06-03T00-00-00-000Z", "report.md"), "utf8");
 	// The walk builds the store itself: nothing from fixtures/replay/memories.json is recalled.
 	expect(report).not.toContain("Run the full test suite");
@@ -272,4 +295,219 @@ test("replay --judge fake writes the third order, already judged, and score prin
 	const scored = dmn(["replay", "score", directory]).stdout.toString();
 	expect(scored.split("\n").filter((line) => line.includes(" p@3 = "))).toHaveLength(3);
 	expect(scored).toContain("activation+judge p@3 = ");
+});
+
+// The walk-ladder cases (D40) share one --out per scenario inside `scratch`, running against the
+// file's fake server; the cases below run in order and each continues the previous one's state.
+const runDirectory = "run-2026-06-03T00-00-00-000Z";
+
+/** One as-live invocation in-process against the fake server; `out` is under `scratch`. */
+async function walk(args: string[], out: string) {
+	return await inProcess(
+		["--as-live", "--judge", "fake", "--store", server.url, "--out", out, ...args],
+		{ DMN_STORE_URL: server.url },
+	);
+}
+
+/** Reads a file of a run directory under `out`. */
+const read = (out: string, name: string) => readFileSync(join(out, runDirectory, name), "utf8");
+
+test("--max-consecutive-failures stops the walk: exit 1, checkpoint, report of what was measured", async () => {
+	const out = join(scratch, "ladder");
+	// a0 and b0 seed (before 09:45); from live-a#1 on the store rejects every retain.
+	failRetain = (documentId) => /^live-a\.jsonl:[12]:/.test(documentId);
+	const before = retainedDocuments.length;
+	const run = await walk(
+		["--measure-from", "2026-01-02T09:45:00Z", "--max-consecutive-failures", "2", liveA, liveB],
+		out,
+	);
+	failRetain = () => false;
+	// Exactly two failing prompts in a row — live-a#1 and live-a#2 — so the store's retain is
+	// called for those two and never for the prompt after (live-b#1).
+	const documents = retainedDocuments.slice(before).sort();
+	expect(documents).toEqual([
+		"live-a.jsonl:0:assistant",
+		"live-a.jsonl:0:user",
+		"live-a.jsonl:1:assistant",
+		"live-a.jsonl:1:user",
+		"live-a.jsonl:2:assistant",
+		"live-a.jsonl:2:user",
+		"live-b.jsonl:0:assistant",
+		"live-b.jsonl:0:user",
+	]);
+	expect(run.code).toBe(1);
+	// One stderr line names the count and the last error (the walk's own retain warnings beside it).
+	const stopLines = run.stderr.split("\n").filter((line) => line.includes("consecutive failures"));
+	expect(stopLines).toHaveLength(1);
+	expect(stopLines[0]).toContain("dmn: stopped after 2 consecutive failures: ");
+	expect(stopLines[0]).toContain("500");
+	expect(run.stderr).toContain("retain failed live-a.jsonl#1:");
+	expect(run.stderr).toContain("retain failed live-a.jsonl#2:");
+	// The report covers exactly the prompts measured before the stop (a1, a2) and the two seeds.
+	const report = read(out, "report.md");
+	expect(report).toContain("seeded: 2");
+	expect(report).toContain("> How do I run the widgets parser tests?");
+	expect(report).toContain("> Why does the widgets parser build fail?");
+	expect(report).not.toContain("### Prompt 3");
+	// The checkpoint holds what the next run resumes from (D40).
+	const checkpoint = JSON.parse(readFileSync(join(out, "checkpoint.json"), "utf8"));
+	expect(checkpoint.seeded).toEqual(["live-a.jsonl:0", "live-b.jsonl:0"]);
+	expect(checkpoint.measured).toEqual(["live-a.jsonl:1", "live-a.jsonl:2"]);
+	expect(checkpoint.entries).toHaveLength(2);
+	expect(checkpoint.lastAt).toBe("2026-01-03T11:00:00.000Z");
+	expect(checkpoint.settings).toEqual({
+		measureFrom: "2026-01-02T09:45:00.000Z",
+		uses: "judged",
+		top: 5,
+	});
+});
+
+test("a rerun into the same --out resumes: checkpointed prompts are skipped, the report is the union", async () => {
+	const out = join(scratch, "ladder");
+	const before = retainedDocuments.length;
+	const run = await walk(["--measure-from", "2026-01-02T09:45:00Z", liveA, liveB], out);
+	expect(run.code).toBe(0);
+	// Never a retain for a checkpointed prompt: only live-b#1's turns are asked for.
+	expect(retainedDocuments.slice(before).sort()).toEqual([
+		"live-b.jsonl:1:assistant",
+		"live-b.jsonl:1:user",
+	]);
+	// And never a recall either: no fourth entry, no recall-failure warning, and the report's
+	// entries are the union in timestamp order (a1, a2, b1).
+	expect(run.stderr).not.toContain("recall failed");
+	const timestamps = [...read(out, "report.md").matchAll(/^### Prompt \d+ \(([^)]+)\)$/gm)].map(
+		(match) => match[1],
+	);
+	expect(timestamps).toEqual([
+		"2026-01-02T10:00:00.000Z",
+		"2026-01-03T11:00:00.000Z",
+		"2026-03-10T09:00:00.000Z",
+	]);
+	expect(read(out, "report.md")).toContain("> The widgets parser build fails again");
+	// The seeded count is the total over both runs (D40).
+	expect(read(out, "report.md")).toContain("seeded: 2");
+	const checkpoint = JSON.parse(readFileSync(join(out, "checkpoint.json"), "utf8"));
+	expect(checkpoint.measured).toHaveLength(3);
+	expect(checkpoint.lastAt).toBe("2026-03-10T09:00:00.000Z");
+});
+
+test("an --out without a checkpoint keeps RunExistsError; a checkpoint with other flags exits 2", async () => {
+	// A run directory with no checkpoint (a plain run's --out): still never overwritten.
+	const plain = join(scratch, "plain-out");
+	mkdirSync(join(plain, runDirectory), { recursive: true });
+	const exists = await walk([liveA], plain);
+	expect(exists.code).toBe(2);
+	expect(exists.stderr).toContain("exists; pass another --out or remove it");
+
+	// The ladder's checkpoint was made with --measure-from 2026-01-02T09:45:00Z, --uses judged
+	// and --top 5: anything else is refused before a single turn is retained.
+	const out = join(scratch, "ladder");
+	const before = retainedDocuments.length;
+	for (const other of [
+		["--measure-from", "2026-01-02T10:30:00Z"],
+		["--uses", "none"],
+		["--top", "4"],
+	]) {
+		const mismatched = await walk([...other, liveA, liveB], out);
+		expect(mismatched.code).toBe(2);
+		expect(mismatched.stderr).toContain("the checkpoint in");
+	}
+	expect(retainedDocuments.length).toBe(before);
+});
+
+test("a resumed walk that retains an older prompt warns once per prompt", async () => {
+	const out = join(scratch, "older");
+	const flags = ["--uses", "none", "--measure-from", "2026-01-01T00:00:00Z"] as const;
+	const first = await walk([...flags, liveA, liveB], out);
+	expect(first.code).toBe(0);
+	// The rerun adds a transcript older than the last checkpointed prompt (b1, 2026-03-10).
+	const before = retainedDocuments.length;
+	const second = await walk([...flags, live0, liveA, liveB], out);
+	expect(second.code).toBe(0);
+	// The older prompts are retained (seeded); no checkpointed prompt is retained again.
+	expect(retainedDocuments.slice(before).sort()).toEqual([
+		"live-0.jsonl:0:assistant",
+		"live-0.jsonl:0:user",
+		"live-0.jsonl:1:assistant",
+		"live-0.jsonl:1:user",
+	]);
+	// Exactly one warning per live-0 prompt, naming transcript, index and both timestamps.
+	const expected = [
+		"dmn: out of order: live-0.jsonl#0 (2025-12-31T09:00:00.000Z) is older than the checkpoint (2026-03-10T09:00:00.000Z); measurements before it did not see it",
+		"dmn: out of order: live-0.jsonl#1 (2025-12-31T10:00:00.000Z) is older than the checkpoint (2026-03-10T09:00:00.000Z); measurements before it did not see it",
+	];
+	expect(second.stderr.split("\n").filter((line) => line.startsWith("dmn: out of order:"))).toEqual(
+		expected,
+	);
+	// The report carries the warnings (the lead reads it to judge a rung, D40).
+	const report = read(out, "report.md");
+	expect(report.match(/^- out of order: /gm)).toHaveLength(2);
+	// Both older prompts fall before --measure-from: retained (seeded), measured none of them.
+	expect(report).toContain("seeded: 2");
+	const entryTimes = [...report.matchAll(/^### Prompt \d+ \(([^)]+)\)$/gm)].map(
+		(match) => match[1] as string,
+	);
+	expect(entryTimes).toHaveLength(5);
+	expect(entryTimes.every((time) => time > "2026-01-01")).toBe(true);
+});
+
+test("the walk prints a progress line every 25 prompts and at each transcript boundary", async () => {
+	// One 26-prompt transcript and a 3-prompt one after it, generated into the temp dir.
+	const exchange = (at: string, number: number) =>
+		`${[
+			JSON.stringify({
+				type: "user",
+				cwd: "/home/dev/acme/widgets",
+				timestamp: at,
+				message: { role: "user", content: `Generated prompt number ${number}` },
+			}),
+			JSON.stringify({
+				type: "assistant",
+				cwd: "/home/dev/acme/widgets",
+				timestamp: at,
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: `Answer to generated prompt number ${number}` }],
+				},
+			}),
+		].join("\n")}\n`;
+	const at = (minutes: number) =>
+		new Date(Date.parse("2026-04-01T09:00:00.000Z") + minutes * 60_000).toISOString();
+	const long = join(scratch, "gen-long.jsonl");
+	writeFileSync(
+		long,
+		Array.from({ length: 26 }, (_, index) => exchange(at(index * 10), index)).join(""),
+	);
+	const tail = join(scratch, "gen-tail.jsonl");
+	writeFileSync(
+		tail,
+		Array.from({ length: 3 }, (_, index) => exchange(at(300 + index * 10), 26 + index)).join(""),
+	);
+	const run = await inProcess(
+		[
+			"--as-live",
+			"--uses",
+			"none",
+			"--store",
+			"fake",
+			"--out",
+			join(scratch, "progress"),
+			long,
+			tail,
+		],
+		{ DMN_STORE_URL: "fake:" },
+	);
+	expect(run.code).toBe(0);
+	// At prompt 25, at the 26th (the long transcript's boundary) and at 29 (the tail's).
+	const lines = run.stderr.split("\n").filter((line) => line.startsWith("progress "));
+	expect(lines).toHaveLength(3);
+	expect(lines[0]).toMatch(
+		/^progress 25\/29 prompts, 0 seeded, 25 measured, 0 failed, \d+:\d+ elapsed$/,
+	);
+	expect(lines[1]).toMatch(
+		/^progress 26\/29 prompts, 0 seeded, 26 measured, 0 failed, \d+:\d+ elapsed$/,
+	);
+	expect(lines[2]).toMatch(
+		/^progress 29\/29 prompts, 0 seeded, 29 measured, 0 failed, \d+:\d+ elapsed$/,
+	);
 });

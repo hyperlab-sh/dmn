@@ -67,9 +67,15 @@ export function renderSummary(scores?: Scores): string {
 	].join("\n");
 }
 
-/** Writes `report.md`, the judgements skeleton (`useful: null`) and the texts `replay judge` needs. */
-export function writeReport(result: ReplayResult, directory: string): void {
-	if (existsSync(directory)) throw new RunExistsError(directory);
+/** Writes `report.md`, the judgements skeleton (`useful: null`) and the texts `replay judge`
+ * needs. A resumed as-live run rewrites the run directory of the checkpoint it resumed (D40);
+ * `overwrite` lifts the guard for that one case. */
+export function writeReport(
+	result: ReplayResult,
+	directory: string,
+	options?: { overwrite?: boolean },
+): void {
+	if (!options?.overwrite && existsSync(directory)) throw new RunExistsError(directory);
 	const lines = [`# dmn replay ${result.run}`, "", `top: ${result.top}`];
 	// The as-live header rows: `score` reads only `top:` and ignores the rest.
 	if (result.live) {
@@ -81,6 +87,10 @@ export function writeReport(result: ReplayResult, directory: string): void {
 		);
 	}
 	lines.push("");
+	// What the walk survived (D37, D40): a failed retain or recall, an out-of-order resume.
+	if (result.warnings.length > 0) {
+		lines.push("warnings:", ...result.warnings.map((warning) => `- ${warning}`), "");
+	}
 	const judgements: Judgement[] = [];
 	const memories: Record<string, string> = {};
 	const prompts: Record<string, string> = {};

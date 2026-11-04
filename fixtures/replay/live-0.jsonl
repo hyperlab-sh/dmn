@@ -1,0 +1,4 @@
+{"type":"user","cwd":"/home/dev/acme/widgets","timestamp":"2025-12-31T09:00:00.000Z","message":{"role":"user","content":"The widgets parser grammar is checked into the repo"}}
+{"type":"assistant","cwd":"/home/dev/acme/widgets","timestamp":"2025-12-31T09:00:30.000Z","message":{"role":"assistant","content":[{"type":"text","text":"The grammar lives beside the parser sources"}]}}
+{"type":"user","cwd":"/home/dev/acme/widgets","timestamp":"2025-12-31T10:00:00.000Z","message":{"role":"user","content":"Who wrote the widgets parser grammar?"}}
+{"type":"assistant","cwd":"/home/dev/acme/widgets","timestamp":"2025-12-31T10:00:30.000Z","message":{"role":"assistant","content":[{"type":"text","text":"The grammar was written by the parsing team"}]}}

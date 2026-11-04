@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ConfigError, createJudge, createStore, loadConfig } from "../../config/config.js";
@@ -9,7 +9,17 @@ import { judgeRun, MissingRunFileError } from "../../replay/judge.js";
 import { orderPrompts, UntimedPromptError } from "../../replay/live.js";
 import { readManifests } from "../../replay/manifests.js";
 import { RunExistsError, readRunTop, writeReport } from "../../replay/report.js";
-import { readSeedMemories, runName, runReplay, seedFakeStore } from "../../replay/run.js";
+import {
+	CheckpointError,
+	checkpointFile,
+	type LiveCheckpoint,
+	parseCheckpoint,
+	readSeedMemories,
+	runName,
+	runReplay,
+	seedFakeStore,
+	writeCheckpoint,
+} from "../../replay/run.js";
 import { readJudgements, score, writeSummary } from "../../replay/score.js";
 import { promptsFrom } from "../../replay/transcript.js";
 import { LocalState } from "../../state/state.js";
@@ -19,14 +29,17 @@ import type { MemoryStore } from "../../store/types.js";
 const usage = `Usage:
   dmn replay <transcript.jsonl>... [--store fake|<url>] [--out <dir>] [--top 5]
              [--memories <json>] [--manifests <dir>] [--judge fake|laya] [--threshold <p>]
-             [--as-live [--measure-from <iso>] [--uses judged|none]]
+             [--as-live [--measure-from <iso>] [--uses judged|none] [--max-consecutive-failures <n>]]
   dmn replay score <run-dir> [--top 5]
   dmn replay judge <run-dir> [--threshold <p>] [--judge fake|laya]
 
 --as-live replays time: prompts walk in timestamp order with the clock set to each one's
   time, turns are retained as the Stop hook would have, and --uses judged (the default;
   needs --judge) counts a shown memory the judge calls useful as used. --measure-from
-  <iso> retains-only the prompts before it, seeding the store from history.
+  <iso> retains-only the prompts before it, seeding the store from history. The walk keeps
+  a checkpoint in --out after every prompt (a rerun into the same --out resumes it), stops
+  after --max-consecutive-failures <n> prompts in a row whose store calls failed (default 5),
+  and prints a progress line to stderr every 25 prompts and when a transcript completes.
 `;
 
 class UsageError extends Error {}
@@ -43,6 +56,7 @@ interface Options {
 	asLive?: boolean;
 	uses?: "judged" | "none";
 	measureFrom?: Date;
+	maxConsecutiveFailures?: number;
 }
 
 function parseArguments(argv: string[]): Options {
@@ -93,6 +107,13 @@ function parseArguments(argv: string[]): Options {
 				const at = new Date(value);
 				if (Number.isNaN(at.getTime())) throw new UsageError("--measure-from is not a date");
 				options.measureFrom = at;
+				break;
+			}
+			case "--max-consecutive-failures": {
+				const count = Number(value);
+				if (!Number.isInteger(count) || count < 1)
+					throw new UsageError("--max-consecutive-failures must be a positive integer");
+				options.maxConsecutiveFailures = count;
 				break;
 			}
 			case "--top": {
@@ -181,8 +202,13 @@ async function judgeCommand(argv: string[]): Promise<number> {
 async function replayCommand(argv: string[]): Promise<number> {
 	const options = parseArguments(argv);
 	if (options.files.length === 0) throw new UsageError("no transcripts given");
-	if ((options.uses !== undefined || options.measureFrom !== undefined) && !options.asLive) {
-		throw new UsageError("--uses and --measure-from need --as-live");
+	if (
+		(options.uses !== undefined ||
+			options.measureFrom !== undefined ||
+			options.maxConsecutiveFailures !== undefined) &&
+		!options.asLive
+	) {
+		throw new UsageError("--uses, --measure-from and --max-consecutive-failures need --as-live");
 	}
 	const uses = options.uses ?? "judged";
 	if (options.asLive && uses === "judged" && !options.judge) {
@@ -225,9 +251,33 @@ async function replayCommand(argv: string[]): Promise<number> {
 	// (D36), not a third order.
 	const judge = options.judge ? judgeFor(options.judge, config, process.env) : undefined;
 
-	// Known before the replay starts: refuse early rather than after every store query.
-	const directory = join(options.out ?? config.replayDir, runName(now));
-	if (existsSync(directory)) throw new RunExistsError(directory);
+	// Known before the replay starts: refuse early rather than after every store query. An
+	// as-live run with a checkpoint in --out resumes it (D40): the walked prompts are skipped,
+	// the report is written over all entries. Any other existing run directory is still refused.
+	const outDirectory = options.out ?? config.replayDir;
+	const directory = join(outDirectory, runName(now));
+	const checkpointPath = join(outDirectory, checkpointFile);
+	let checkpoint: LiveCheckpoint | undefined;
+	if (options.asLive && existsSync(checkpointPath)) {
+		checkpoint = parseCheckpoint(readFileSync(checkpointPath, "utf8"), checkpointPath);
+		const settings = {
+			measureFrom: options.measureFrom?.toISOString() ?? null,
+			uses,
+			top: options.top ?? 5,
+		};
+		const resumed = checkpoint.settings;
+		if (
+			resumed.measureFrom !== settings.measureFrom ||
+			resumed.uses !== settings.uses ||
+			resumed.top !== settings.top
+		) {
+			throw new UsageError(
+				`the checkpoint in ${outDirectory} was made with --measure-from ${resumed.measureFrom ?? "none"}, --uses ${resumed.uses} and --top ${resumed.top}; resume with those or choose another --out`,
+			);
+		}
+	} else if (existsSync(directory)) {
+		throw new RunExistsError(directory);
+	}
 
 	// A scratch state: replay must not touch the real use counts.
 	const scratch = mkdtempSync(join(tmpdir(), "dmn-replay-"));
@@ -257,11 +307,23 @@ async function replayCommand(argv: string[]): Promise<number> {
 					},
 					...(judge && { judge }),
 					...(options.measureFrom !== undefined && { measureFrom: options.measureFrom }),
+					maxConsecutiveFailures: options.maxConsecutiveFailures ?? 5,
+					...(checkpoint && { checkpoint }),
+					onCheckpoint: (saved: LiveCheckpoint) => writeCheckpoint(checkpointPath, saved),
+					onProgress: (line: string) => process.stderr.write(`${line}\n`),
 				},
 			}),
 		});
-		writeReport(result, directory);
+		writeReport(result, directory, checkpoint ? { overwrite: true } : undefined);
 		for (const warning of result.warnings) process.stderr.write(`dmn: ${warning}\n`);
+		if (result.live?.stopped) {
+			// The walk ended on --max-consecutive-failures (D40): the report of what was measured
+			// so far is on disk; this one line says why the walk stopped, with the count and error.
+			process.stderr.write(
+				`dmn: stopped after ${result.live.stopped.failures} consecutive failures: ${result.live.stopped.lastError}\n`,
+			);
+			return 1;
+		}
 		process.stdout.write(
 			`wrote ${join(directory, "report.md")} and ${join(directory, "judgements.json")}\n`,
 		);
@@ -288,7 +350,8 @@ export async function run(argv: string[]): Promise<number> {
 			error instanceof ConfigError ||
 			error instanceof RunExistsError ||
 			error instanceof MissingRunFileError ||
-			error instanceof UntimedPromptError
+			error instanceof UntimedPromptError ||
+			error instanceof CheckpointError
 		) {
 			process.stderr.write(`dmn: ${error.message}\n\n${usage}`);
 			return 2;

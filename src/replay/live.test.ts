@@ -6,7 +6,7 @@ import { loadConfig } from "../config/config.js";
 import { FakeJudge } from "../judge/fake.js";
 import { LocalState } from "../state/state.js";
 import { FakeStore } from "../store/fake.js";
-import type { MemoryRecord, RetainItem } from "../store/types.js";
+import type { MemoryRecord, RecallQuery, RetainItem } from "../store/types.js";
 import { orderPrompts } from "./live.js";
 import { runReplay } from "./run.js";
 
@@ -61,6 +61,23 @@ class FlakyStore extends FakeStore {
 			throw new Error("hindsight 500: fact extraction refused");
 		}
 		await super.retain(bank, items);
+	}
+}
+
+/** A store that cannot answer the recall of one chosen prompt (D40): the query is that prompt's text. */
+class BlindStore extends FakeStore {
+	private readonly blindSpot: string;
+
+	constructor(clock: () => Date, blindSpot: string) {
+		super(clock);
+		this.blindSpot = blindSpot;
+	}
+
+	async recall(bank: string, query: RecallQuery): Promise<MemoryRecord[]> {
+		if (query.query === this.blindSpot) {
+			throw new Error("hindsight 504: the operation timed out");
+		}
+		return super.recall(bank, query);
 	}
 }
 
@@ -255,6 +272,47 @@ test("a failed retain is one warning; the walk goes on and the next prompt still
 	expect(listed).not.toContain(texts.a1a);
 	// No retry: exactly one retain call per prompt.
 	expect(store.retainCalls).toBe(prompts.length);
+});
+
+test("a failed recall is one warning and costs only that prompt's measurement; the walk goes on", async () => {
+	let clockNow = now;
+	const clock = { set: (at: Date) => (clockNow = at) };
+	const state = new LocalState({
+		directory: join(scratch, `s${states.length}`),
+		clock: () => clockNow,
+	});
+	states.push(state);
+	// The store cannot answer a1's recall ("How do I run the widgets parser tests?").
+	const store = new BlindStore(() => clockNow, "How do I run the widgets parser tests?");
+	const result = await runReplay({
+		prompts,
+		store,
+		state,
+		config,
+		top: 10,
+		random: counter(),
+		now,
+		live: { uses: "none", clock, maxConsecutiveFailures: 2 },
+	});
+	// The warning names the transcript, the prompt index and the message — nothing else failed.
+	expect(result.warnings).toEqual([
+		"recall failed live-a.jsonl#1: hindsight 504: the operation timed out",
+	]);
+	// a1 has no entry; every other prompt does, b1's included.
+	expect(result.entries.map((entry) => entry.prompt.text)).toEqual([
+		texts.a0u,
+		texts.b0u,
+		texts.a2u,
+		texts.b1u,
+	]);
+	// The failed prompt's turns were still retained: the next prompt (a2, the day after)
+	// recalls them.
+	const after = result.entries[2];
+	if (!after) throw new Error("no entry after the failed recall");
+	const listed = [...after.store, ...after.activation].map((memory) => memory.text);
+	expect(listed).toEqual(expect.arrayContaining([texts.a1u, texts.a1a]));
+	// One failed prompt between successful ones does not stop the walk (the counter resets).
+	expect(result.live?.stopped).toBeUndefined();
 });
 
 test("the sweep runs on the replayed day change: an unused day-1 memory is dormant by day 60", async () => {
