@@ -47,13 +47,19 @@ export interface TypeSafeOptions {
  * The answers an item's request produced, or `undefined` when the service did not answer it.
  * A call where every item failed fails like a batch provider's would, with the first item's
  * error; a call where some stand resolves with those, the single-request form of a per-item
- * `{error}` entry.
+ * `{error}` entry. The deadline is the exception: it bounds the whole call and rejects it.
  */
 function settle<T>(answers: (T | undefined)[], errors: (JudgeError | undefined)[]): T[] {
 	const answered = answers.filter((answer) => answer !== undefined) as T[];
 	if (answered.length > 0 || errors.every((error) => error === undefined)) return answered;
 	throw errors.find((error) => error !== undefined);
 }
+
+/**
+ * The judge error the whole-call deadline raises, as a subclass so `askAll` can tell it from
+ * an item's own failure: a deadline costs the call, not the item that happened to hit it.
+ */
+class DeadlineError extends JudgeError {}
 
 /**
  * Usefulness and kind judge over TypeSafe's Jev model (`/v1/systemone`, plain fetch). The
@@ -116,13 +122,18 @@ export class TypeSafeJudge implements Judge, KindJudge {
 		});
 	}
 
-	/** One request per item, at most `inFlight` in flight; a failed request costs its item only. */
+	/**
+	 * One request per item, at most `inFlight` in flight; a failed request costs its item only.
+	 * A deadline error costs the call: the worker stops pulling items and the error is rethrown
+	 * after the wave settles, however many items answered before the budget ran out.
+	 */
 	private async askAll<Item, Answer>(
 		items: Item[],
 		ask: (item: Item, index: number) => Promise<Answer | undefined>,
 	): Promise<Answer[]> {
 		const answers: (Answer | undefined)[] = [];
 		const errors: (JudgeError | undefined)[] = [];
+		let deadline: JudgeError | undefined;
 		let next = 0;
 		const worker = async () => {
 			while (next < items.length) {
@@ -130,11 +141,16 @@ export class TypeSafeJudge implements Judge, KindJudge {
 				try {
 					answers[index] = await ask(items[index] as Item, index);
 				} catch (error) {
+					if (error instanceof DeadlineError) {
+						deadline = error;
+						return;
+					}
 					errors[index] = error as JudgeError;
 				}
 			}
 		};
 		await Promise.all(Array.from({ length: Math.min(inFlight, items.length) }, worker));
+		if (deadline !== undefined) throw deadline;
 		return settle(answers, errors);
 	}
 
@@ -149,6 +165,14 @@ export class TypeSafeJudge implements Judge, KindJudge {
 				? Number.POSITIVE_INFINITY
 				: this.deadlineMs - (this.now() - startedAt);
 		for (let attempt = 1; ; attempt++) {
+			// The budget is spent before this attempt even leaves: a queued item picked up past the
+			// deadline never sends, so the pool cannot outlive the caller's budget wave after wave.
+			if (remaining() <= 0) {
+				throw new DeadlineError(
+					`POST ${this.url} abandoned: ${this.deadlineMs}ms deadline reached before attempt ${attempt}`,
+					0,
+				);
+			}
 			let response: Response;
 			try {
 				response = await this.fetcher(this.url, {
@@ -178,7 +202,7 @@ export class TypeSafeJudge implements Judge, KindJudge {
 			const wait = Math.min(maxDelayMs, Math.max(retryAfterMs(response, this.now()) ?? 0, backoff));
 			// The budget is spent, or the wait alone would blow it: stop rather than hold the caller.
 			if (wait >= remaining()) {
-				throw new JudgeError(
+				throw new DeadlineError(
 					`POST ${this.url} abandoned: ${this.deadlineMs}ms deadline reached before attempt ${attempt + 1}`,
 					0,
 				);
