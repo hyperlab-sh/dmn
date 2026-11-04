@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { type ActivationParameters, defaultActivationParameters } from "../activation/act-r.js";
 import { LayaJudge } from "../judge/laya.js";
 import type { Judge, KindJudge } from "../judge/types.js";
+import { TypeSafeJudge } from "../judge/typesafe.js";
 import type { LocalState } from "../state/state.js";
 import { FakeStore } from "../store/fake.js";
 import { HindsightStore } from "../store/hindsight.js";
@@ -17,7 +18,7 @@ export class ConfigError extends Error {
 }
 
 export interface JudgeConfig {
-	provider: "none" | "laya";
+	provider: "none" | "laya" | "typesafe";
 	/** `useful` in `replay judge` when P(useful) is at least this. */
 	threshold: number;
 	/** Bar for the intrusive path, read by the judge gate. */
@@ -211,8 +212,10 @@ function readJudge(value: unknown, defaults: JudgeConfig): JudgeConfig {
 	for (const [key, entry] of Object.entries(value)) {
 		switch (key) {
 			case "provider":
-				if (entry !== "none" && entry !== "laya") {
-					throw new ConfigError('config.json: "judge.provider" must be "none" or "laya"');
+				if (entry !== "none" && entry !== "laya" && entry !== "typesafe") {
+					throw new ConfigError(
+						'config.json: "judge.provider" must be "none", "laya" or "typesafe"',
+					);
 				}
 				judge.provider = entry;
 				break;
@@ -245,8 +248,9 @@ function readJudge(value: unknown, defaults: JudgeConfig): JudgeConfig {
 
 /**
  * The configured judge, or undefined for provider `none`. The key comes from the environment
- * only and has no default. `options.deadlineMs` bounds a whole call — attempts, retries and
- * waits — for callers with a latency budget (hooks); without it only each attempt is bounded.
+ * only and has no default, one variable per provider. `options.deadlineMs` bounds a whole
+ * call — attempts, retries and waits — for callers with a latency budget (hooks); without it
+ * only each attempt is bounded.
  */
 export function createJudge(
 	config: Config,
@@ -254,18 +258,20 @@ export function createJudge(
 	options?: { deadlineMs?: number },
 ): (Judge & KindJudge) | undefined {
 	if (config.judge.provider === "none") return undefined;
-	const apiKey = env.LAYA_API_KEY;
+	const provider = config.judge.provider;
+	const apiKey = provider === "laya" ? env.LAYA_API_KEY : env.TYPESAFE_API_KEY;
 	if (!apiKey) {
 		throw new ConfigError(
-			'LAYA_API_KEY is not set; export it to use judge provider "laya" (the key is read from the environment only)',
+			`${provider === "laya" ? "LAYA_API_KEY" : "TYPESAFE_API_KEY"} is not set; export it to use judge provider "${provider}" (the key is read from the environment only)`,
 		);
 	}
-	return new LayaJudge({
+	const shared = {
 		apiKey,
 		timeoutMs: config.judge.timeoutMs,
 		...(config.judge.baseUrl && { baseUrl: config.judge.baseUrl }),
 		...(options?.deadlineMs !== undefined && { deadlineMs: options.deadlineMs }),
-	});
+	};
+	return provider === "laya" ? new LayaJudge(shared) : new TypeSafeJudge(shared);
 }
 
 /**
