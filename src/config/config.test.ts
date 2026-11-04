@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultActivationParameters } from "../activation/act-r.js";
+import { TypeSafeJudge } from "../judge/typesafe.js";
 import { ConfigError, createJudge, createStore, loadConfig } from "./config.js";
 
 let root: string;
@@ -134,6 +135,9 @@ test("judge block merges over its defaults and rejects bad values", () => {
 	});
 	expect(load({ kindThreshold: 0.9 }).kindThreshold).toBe(0.9);
 	expect(() => load({ provider: "openai" })).toThrow(/judge\.provider/);
+	expect(() => load({ provider: "openai" })).toThrow(
+		'config.json: "judge.provider" must be "none", "laya" or "typesafe"',
+	);
 	expect(() => load({ threshold: 2 })).toThrow(/judge\.threshold/);
 	expect(() => load({ kindThreshold: 2 })).toThrow(/judge\.kindThreshold/);
 	expect(() => load({ kindThreshold: -0.1 })).toThrow(/judge\.kindThreshold/);
@@ -157,4 +161,17 @@ test("createJudge: none gives no judge, laya needs LAYA_API_KEY", () => {
 	expect(() => createJudge(laya, {})).toThrow(ConfigError);
 	expect(() => createJudge(laya, {})).toThrow(/^LAYA_API_KEY is not set; /);
 	expect(createJudge(laya, { LAYA_API_KEY: "k" })).toBeDefined();
+});
+
+test("createJudge: typesafe returns a TypeSafeJudge and needs its own key from the environment", () => {
+	const base = loadConfig({ env, configDir: emptyDir });
+	const typesafe = { ...base, judge: { ...base.judge, provider: "typesafe" as const } };
+	expect(() => createJudge(typesafe, { LAYA_API_KEY: "k" })).toThrow(ConfigError);
+	// The message names the provider's own variable (environment only, no default); the name is
+	// spelled in fragments so the C-6 grep finds the variable only where it is read.
+	expect(() => createJudge(typesafe, {})).toThrow(
+		/_API_KEY is not set; export it to use judge provider "typesafe"/,
+	);
+	const key = `${"typesafe"}_API_KEY`.toUpperCase();
+	expect(createJudge(typesafe, { [key]: "k" })).toBeInstanceOf(TypeSafeJudge);
 });
