@@ -6,13 +6,14 @@ with status 2 and names it.
 
 ## Environment
 
-| Variable          | Required                      | Meaning                                                                                                                                               |
-| ----------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DMN_STORE_URL`   | yes                           | Base URL of the memory store (a Hindsight server), or `fake:` for a throwaway in-memory store used by tests and dry runs.                             |
-| `LAYA_API_KEY`    | with `judge.provider: "laya"` | API key of the Laya judge (`dmn hook`, `dmn replay`, `dmn replay judge`). Environment only: never put it in `config.json`. No default; unset exits 2. |
-| `XDG_CONFIG_HOME` | no                            | Holds `dmn/config.json`. Falls back to `~/.config`.                                                                                                   |
-| `XDG_STATE_HOME`  | no                            | Holds `dmn/state.sqlite` (use counts, dormancy). Falls back to `~/.local/state`.                                                                      |
-| `XDG_DATA_HOME`   | no                            | Holds `dmn/replay/`. Falls back to `~/.local/share`.                                                                                                  |
+| Variable           | Required                          | Meaning                                                                                                                                                         |
+| ------------------ | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DMN_STORE_URL`    | yes                               | Base URL of the memory store (a Hindsight server), or `fake:` for a throwaway in-memory store used by tests and dry runs.                                       |
+| `LAYA_API_KEY`     | with `judge.provider: "laya"`     | API key of the Laya judge (`dmn hook`, `dmn replay`, `dmn replay judge`). Environment only: never put it in `config.json`. No default; unset exits 2.           |
+| `TYPESAFE_API_KEY` | with `judge.provider: "typesafe"` | API key of the TypeSafe (Jev) judge (`dmn hook`, `dmn replay`, `dmn replay judge`). Environment only: never put it in `config.json`. No default; unset exits 2. |
+| `XDG_CONFIG_HOME`  | no                                | Holds `dmn/config.json`. Falls back to `~/.config`.                                                                                                             |
+| `XDG_STATE_HOME`   | no                                | Holds `dmn/state.sqlite` (use counts, dormancy). Falls back to `~/.local/state`.                                                                                |
+| `XDG_DATA_HOME`    | no                                | Holds `dmn/replay/`. Falls back to `~/.local/share`.                                                                                                            |
 
 ## `config.json`
 
@@ -51,31 +52,48 @@ Located at `$XDG_CONFIG_HOME/dmn/config.json`. Every key is optional.
 }
 ```
 
-| Key                  | Default                   | Meaning                                                                                                                                                                                                                    |
-| -------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `provider`           | `none`                    | `none` or `laya`. With `laya`, `LAYA_API_KEY` must be set.                                                                                                                                                                 |
-| `threshold`          | `0.5`                     | Read by prompt-time recall (`SessionStart`, `UserPromptSubmit`): a candidate with P(useful) below it is not injected. Also by `replay judge` (marks `useful`) and `replay --judge` (the third order) (0..1).               |
-| `intrusionThreshold` | `0.7`                     | Read by the intrusive path: the one memory chosen to surface is judged and dropped below this (0..1). Not the activation `intrusionThreshold` above.                                                                       |
-| `kindThreshold`      | `0.5`                     | Read by the Stop hook: a turn the judge calls `learning` or `decision` with P(kind) at or above this is tagged `kind:<kind>`; an unanswered or lower-rated turn keeps `kind:turn` (0..1).                                  |
-| `baseUrl`            | `https://api.laya.studio` | Another server speaking the same API (for example a local model).                                                                                                                                                          |
-| `timeoutMs`          | `30000`                   | Per-attempt limit; a 64-item batch is slow, unlike a hook. In hooks the whole call — attempts, retries and waits — is bounded by the hook's own store limit (`storeTimeoutMs`, or `intrusionTimeoutMs` after a tool call). |
+| Key                  | Default            | Meaning                                                                                                                                                                                                                                      |
+| -------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `provider`           | `none`             | `none`, `laya` or `typesafe`. With `laya`, `LAYA_API_KEY` must be set; with `typesafe`, `TYPESAFE_API_KEY`.                                                                                                                                  |
+| `threshold`          | `0.5`              | Read by prompt-time recall (`SessionStart`, `UserPromptSubmit`): a candidate with P(useful) below it is not injected. Also by `replay judge` (marks `useful`) and `replay --judge` (the third order) (0..1).                                 |
+| `intrusionThreshold` | `0.7`              | Read by the intrusive path: the one memory chosen to surface is judged and dropped below this (0..1). Not the activation `intrusionThreshold` above.                                                                                         |
+| `kindThreshold`      | `0.5`              | Read by the Stop hook: a turn the judge calls `learning` or `decision` with P(kind) at or above this is tagged `kind:<kind>`; an unanswered or lower-rated turn keeps `kind:turn` (0..1).                                                    |
+| `baseUrl`            | the provider's own | Another server speaking the same API: `https://api.laya.studio` for Laya, `https://api.typesafe.ai` for TypeSafe (for example a local model).                                                                                                |
+| `timeoutMs`          | `30000`            | Per-attempt limit; a batch or a burst of judge calls is slow, unlike a hook. In hooks the whole call — attempts, retries and waits — is bounded by the hook's own store limit (`storeTimeoutMs`, or `intrusionTimeoutMs` after a tool call). |
 
 With `provider: "none"` (the default) no judge exists and nothing is sent anywhere. With `laya`,
 prompt-time recall makes one batch call per prompt and the intrusive path one single-memory call
-per surfaced thought; in prompt-time recall a candidate the judge did not answer is kept. The
-Stop hook asks the same judge, in one batch call per turn-end, which kind of memory each retained
+per surfaced thought; in prompt-time recall a candidate the judge did not answer is kept. With
+`typesafe` the same calls are made one request per memory or text — the TypeSafe endpoint has no
+batch form — with at most 8 requests in flight and the same questions; a request that fails
+leaves its item unanswered while the others stand. The
+Stop hook asks the same judge, in one batch call per turn-end (one request per turn with
+`typesafe`), which kind of memory each retained
 turn is and tags it `kind:turn`, `kind:learning` or `kind:decision`; an unanswered or
 lower-rated turn keeps `kind:turn`, and a turn that holds a secret is never sent to the judge at
 all. If the judge fails (network, timeout, balance) the hook still succeeds: the injection is
 the unfiltered one, a warning goes to stderr, an intrusive thought is dropped, and at Stop every
 turn of the event is retained `kind:turn`. At Stop a judge that cannot even be built
-(`provider: "laya"` without `LAYA_API_KEY`) warns on stderr and retains `kind:turn` instead of
+(`provider: "laya"` without `LAYA_API_KEY`, `provider: "typesafe"` without `TYPESAFE_API_KEY`)
+warns on stderr and retains `kind:turn` instead of
 failing, and no judge call, however it retries, outlives the hook's own store limit. An
 intrusive thought the judge leaves unanswered, or that holds a secret (so is never sent), is
 dropped too. A secret-bearing prompt or memory is never sent; in prompt-time recall it is kept
 unjudged.
 
-See [Judge with Laya](replay.md#judge-with-laya).
+### TypeSafe (Jev)
+
+The `typesafe` provider asks TypeSafe's Jev model (`model: "jev-latest"`) at
+`https://api.typesafe.ai/v1/systemone` (`judge.baseUrl` overrides). Each request carries one
+state — the prompt and the memory text (cut to 1,500 characters), or the bare text for a kind
+question — and the same questions the Laya provider asks; no ids, tags, working directories or
+organization names are sent. The endpoint has no batch form, so one memory is one request, at
+most 8 in flight, retried on 429 and 503 (up to five attempts, honouring `Retry-After`); a
+request that fails leaves that item unanswered and the others stand. Jev reads 32k tokens per
+question, so whole prompts are judged instead of a truncated head, and each request is billed
+on its `usage.input_tokens`.
+
+See [Judge with Laya](replay.md#judge-with-laya) and [Judge with TypeSafe](replay.md#judge-with-typesafe-jev).
 
 ### Organizations
 
