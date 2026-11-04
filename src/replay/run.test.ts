@@ -66,7 +66,7 @@ test("report lists the cue, the excerpt and both top-5 lists; judgements are one
 	) as Judgement[];
 
 	expect(result.entries).toHaveLength(prompts.length);
-	expect(report).toContain("cue: (generic, none, typescript, developer, test)");
+	expect(report).toContain("cue: (generic, widgets, typescript, developer, test)");
 	expect(report).toContain("> Fix the failing parser test");
 	expect(report).toContain("store:");
 	expect(report).toMatch(

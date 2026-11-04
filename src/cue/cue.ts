@@ -71,7 +71,27 @@ function resolveWhere(input: CueInput): { organization: string; project: string 
 		};
 	}
 	if (origin) return { organization: origin.owner ?? "generic", project: origin.repo };
-	return { organization: "generic", project: "none" };
+	return whereFromPath(input.cwd, input.organizations);
+}
+
+/**
+ * Where the path alone says we are (D42): the project is the segment before a `worktrees`
+ * segment when the path has one (a worktree belongs to the space around it), else the last
+ * segment; the organization is the `organizations` mapping on the parent of that segment,
+ * else `generic`. The last resort of `resolveWhere`: a recorded cwd no scan can reach, or a
+ * live cwd outside any repository, gets the same answer.
+ */
+function whereFromPath(
+	cwd: string,
+	organizations: Record<string, string>,
+): { organization: string; project: string } {
+	const segments = cwd.split(/[\\/]/).filter(Boolean);
+	const worktrees = segments.indexOf("worktrees");
+	const at = worktrees > 0 ? worktrees - 1 : segments.length - 1;
+	const project = segments[at] ?? "none";
+	const parent = segments[at - 1] ?? "";
+	const mapped = Object.hasOwn(organizations, parent) ? organizations[parent] : undefined;
+	return { organization: mapped ?? "generic", project };
 }
 
 /** Pure: the same input always gives the same cue. */
