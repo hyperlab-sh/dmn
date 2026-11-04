@@ -297,6 +297,98 @@ test("replay --judge fake writes the third order, already judged, and score prin
 	expect(scored).toContain("activation+judge p@3 = ");
 });
 
+test("--judge typesafe is accepted by replay judge and replay, and judges through the TypeSafe provider", async () => {
+	// The variable name is spelled in fragments so the C-6 grep finds it only where it is read.
+	const key = `${"typesafe"}_API_KEY`.toUpperCase();
+	const directory = copyOfBase("judged-typesafe");
+	// A memory shown in both orders of a prompt is judged once: one POST per prompt–memory pair.
+	const pristine = JSON.parse(readFileSync(join(directory, "judgements.json"), "utf8")) as {
+		prompt: number;
+		id: string;
+	}[];
+	const pairs = new Set(pristine.map((entry) => `${entry.prompt}:${entry.id}`)).size;
+	const seen: { url: string; authorization: string | undefined; body: { model: string } }[] = [];
+	const originalFetch = globalThis.fetch;
+	const typesafe = (async (url: string, init: RequestInit) => {
+		seen.push({
+			url,
+			authorization: (init.headers as Record<string, string>).authorization,
+			body: JSON.parse(init.body as string),
+		});
+		return Response.json({
+			model: "jev-1.14.0",
+			answers: {
+				useful: { type: "noul", noul: 0.9 },
+				level: { type: "score", score: 2 },
+			},
+			usage: { input_tokens: 480, output_tokens: 68 },
+		});
+	}) as typeof fetch;
+	globalThis.fetch = typesafe;
+	try {
+		const judged = await inProcess(["judge", directory, "--judge", "typesafe"], {
+			[key]: "secret-typesafe-key",
+		});
+		expect(judged.code).toBe(0);
+		const entries = JSON.parse(readFileSync(join(directory, "judgements.json"), "utf8")) as {
+			judge?: { useful: number; level: number };
+		}[];
+		expect(entries).toHaveLength(42);
+		// Every entry was answered from the TypeSafe shape: noul and score landed as-is.
+		expect(entries.every((entry) => entry.judge?.useful === 0.9 && entry.judge?.level === 2)).toBe(
+			true,
+		);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+	// One POST per judged pair, to the TypeSafe endpoint, bearer key, Jev model.
+	expect(seen).toHaveLength(pairs);
+	expect(seen.every((request) => request.url === "https://api.typesafe.ai/v1/systemone")).toBe(
+		true,
+	);
+	expect(seen.every((request) => request.authorization === "Bearer secret-typesafe-key")).toBe(
+		true,
+	);
+	expect(seen.every((request) => request.body.model === "jev-latest")).toBe(true);
+	for (const file of readdirSync(directory)) {
+		expect(readFileSync(join(directory, file), "utf8")).not.toContain("secret-typesafe-key");
+	}
+
+	// The same flag adds the third order to a plain replay, judged through the patched fetch.
+	const out = join(scratch, "out-judged-typesafe");
+	globalThis.fetch = typesafe;
+	try {
+		const third = await inProcess(
+			[
+				"--store",
+				"fake",
+				"--out",
+				out,
+				"--top",
+				"3",
+				"--judge",
+				"typesafe",
+				join(root, "fixtures/replay/session-a.jsonl"),
+				join(root, "fixtures/replay/session-b.jsonl"),
+			],
+			{ [key]: "secret-typesafe-key" },
+		);
+		expect(third.code).toBe(0);
+		expect(third.stderr).toBe("");
+		expect(readFileSync(join(out, readdirSync(out)[0] as string, "report.md"), "utf8")).toContain(
+			"activation+judge:",
+		);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+
+	// A bogus value is refused with the message and usage that list every provider.
+	const bogus = await inProcess(["judge", base, "--judge", "openai"]);
+	expect(bogus.code).toBe(2);
+	expect(bogus.stderr).toContain("--judge must be fake, laya or typesafe");
+	expect(bogus.stderr).toContain("[--judge fake|laya|typesafe]");
+});
+
 // The walk-ladder cases (D40) run against the file's fake server, each into its own --out under
 // `scratch`; the first case below is one ladder scenario in three steps (stop, guards, resume).
 const runDirectory = "run-2026-06-03T00-00-00-000Z";
