@@ -1,4 +1,13 @@
 import {
+	clamp,
+	kindQuestions,
+	kinds,
+	memoryLimit,
+	memoryState,
+	questions,
+	retryAfterMs,
+} from "./questions.js";
+import {
 	type Classification,
 	type Judge,
 	JudgeError,
@@ -10,7 +19,6 @@ import {
 
 const layaBaseUrl = "https://api.laya.studio";
 const batchLimit = 64;
-const memoryLimit = 1500;
 const maxAttempts = 5;
 const baseDelayMs = 500;
 const maxDelayMs = 60_000;
@@ -31,58 +39,6 @@ export interface LayaOptions {
 	random?: () => number;
 	/** Clock for `Retry-After` given as an HTTP date and for the deadline. */
 	now?: () => number;
-}
-
-const questions = {
-	useful: {
-		type: "noul",
-		instructions: "Would the memory help the engineer do what the prompt asks?",
-		// An object: the API rejects a string here with invalid_request.
-		criteria: {
-			true: "The memory tells the engineer something they need to do what the prompt asks",
-			false: "The memory tells the engineer nothing they need to do what the prompt asks",
-		},
-	},
-	level: {
-		type: "score",
-		instructions: "How much the memory helps the engineer do what the prompt asks.",
-		criteria: [
-			"useless: unrelated to the prompt",
-			"background: about the same project or area, but not needed for this prompt",
-			"helpful: contains something relevant the engineer can use for this prompt",
-			"decisive: contains the fact or decision the engineer needs to do what the prompt asks",
-		],
-	},
-};
-
-const kindQuestions = {
-	kind: {
-		type: "choice",
-		instructions: "Which kind of memory is this text?",
-		criteria: {
-			turn: "an exchange that only makes sense inside its own session",
-			learning:
-				"a fact about the code, the tools or the environment that will hold in a later session",
-			decision: "a choice that was made and the reason for it",
-		},
-	},
-};
-
-const kinds: readonly MemoryKind[] = ["turn", "learning", "decision"];
-
-const state = (prompt: string, memory: JudgeMemory) =>
-	`Prompt from the engineer:\n${prompt}\n\nMemory from a past session:\n${memory.text.slice(0, memoryLimit)}`;
-
-const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value));
-
-/** Milliseconds a `Retry-After` header asks for: delay-seconds or an HTTP date. */
-function retryAfterMs(response: Response, now: number): number | undefined {
-	const header = response.headers.get("retry-after");
-	if (!header) return undefined;
-	const seconds = Number(header);
-	if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
-	const date = Date.parse(header);
-	return Number.isNaN(date) ? undefined : Math.max(0, date - now);
 }
 
 /**
@@ -152,7 +108,7 @@ export class LayaJudge implements Judge, KindJudge {
 		startedAt: number,
 	): Promise<Judgement[]> {
 		const body = JSON.stringify({
-			requests: memories.map((memory) => ({ state: state(prompt, memory), questions })),
+			requests: memories.map((memory) => ({ state: memoryState(prompt, memory), questions })),
 		});
 		return this.parse(await this.post(body, startedAt), memories);
 	}
