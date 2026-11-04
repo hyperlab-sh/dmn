@@ -75,11 +75,13 @@ function resolveWhere(input: CueInput): { organization: string; project: string 
 }
 
 /**
- * Where the path alone says we are (D42): the project is the segment before a `worktrees`
- * segment when the path has one (a worktree belongs to the space around it), else the last
- * segment; the organization is the `organizations` mapping on the parent of that segment,
- * else `generic`. The last resort of `resolveWhere`: a recorded cwd no scan can reach, or a
- * live cwd outside any repository, gets the same answer.
+ * Where the path alone says we are (D42, D44): the project is the segment before a `worktrees`
+ * segment when the path has one (a worktree belongs to the space around it), else the segment
+ * right after the first directory named in `organizations` (the mapped organization directory
+ * anchors the project in the space it opens), else the last segment; the organization is the
+ * `organizations` mapping on the parent of that segment, else `generic`. The last resort of
+ * `resolveWhere`: a recorded cwd no scan can reach, or a live cwd outside any repository, gets
+ * the same answer.
  */
 function whereFromPath(
 	cwd: string,
@@ -87,7 +89,13 @@ function whereFromPath(
 ): { organization: string; project: string } {
 	const segments = cwd.split(/[\\/]/).filter(Boolean);
 	const worktrees = segments.indexOf("worktrees");
-	const at = worktrees > 0 ? worktrees - 1 : segments.length - 1;
+	const anchor = segments.findIndex(
+		(segment, index) => index + 1 < segments.length && Object.hasOwn(organizations, segment),
+	);
+	let at: number;
+	if (worktrees > 0) at = worktrees - 1;
+	else if (anchor >= 0) at = anchor + 1;
+	else at = segments.length - 1;
 	const project = segments[at] ?? "none";
 	const parent = segments[at - 1] ?? "";
 	const mapped = Object.hasOwn(organizations, parent) ? organizations[parent] : undefined;

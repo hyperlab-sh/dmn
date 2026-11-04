@@ -162,14 +162,17 @@ time, exactly as they would have.
   scoring work on the run exactly as on a plain one.
 - **Where the cue's organization and project come from.** The recorded working directory may
   not exist on the machine running the walk, so the cue is built from the transcript alone and
-  the path stands in for the scan: the project is the segment before a `worktrees` segment when
-  the path has one (`/work/lab/some-space/worktrees/main` → `some-space`), else the last segment
-  (`/home/u/src/core` → `core`); the organization is the `organizations` mapping applied to the
-  segment before that project segment (`lab` → `hyperlab` when mapped), else `generic`. An
-  empty or root cwd keeps `project: none`. Retained memories therefore land in the bank — and
-  carry the `project:` tag — of the project the transcript was recorded in, and a live prompt
-  outside any repository gets the same answer: the scan runs first and this path rule is only
-  its fallback.
+  the path stands in for the scan. The project is the first of three rules the path offers: the
+  segment before a `worktrees` segment when the path has one
+  (`/work/lab/some-space/worktrees/main` → `some-space`); else the segment right after the
+  first directory named in the `organizations` mapping, which anchors the project in the space
+  it opens (`/work/lab/some-space/notes/briefs` with `lab` mapped → `some-space`); else the
+  last segment (`/home/u/src/core` → `core`). The organization is the `organizations` mapping
+  applied to the segment before that project segment (`lab` → `hyperlab` when mapped), else
+  `generic`. An empty or root cwd keeps `project: none`. Retained memories therefore land in
+  the bank — and carry the `project:` tag — of the project the transcript was recorded in, and
+  a live prompt outside any repository gets the same answer: the scan runs first and this path
+  rule is only its fallback.
 
 With `--store fake` an as-live run starts from an empty in-process store — the walk builds
 the store itself, and seeding the dated fixture memories would recall later content at
