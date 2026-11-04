@@ -80,7 +80,7 @@ export class CheckpointError extends Error {
 }
 
 /** The checkpoint of one walk, as serialized in `--out`. */
-export function formatCheckpoint(checkpoint: LiveCheckpoint): string {
+function formatCheckpoint(checkpoint: LiveCheckpoint): string {
 	return `${JSON.stringify(checkpoint, null, 2)}\n`;
 }
 
@@ -150,6 +150,8 @@ export interface LiveOptions {
 	onCheckpoint?: (checkpoint: LiveCheckpoint) => void;
 	/** Sees one line every 25 walked prompts and when a transcript completes (D40). */
 	onProgress?: (line: string) => void;
+	/** Wall clock the progress line's elapsed time reads; defaults to the real one (C-7). */
+	nowMs?: () => number;
 }
 
 export interface ReplayOptions {
@@ -286,6 +288,7 @@ export async function runReplay({
 			live,
 			warnings,
 			entries,
+			nowMs: live.nowMs,
 		});
 	}
 	// Sequential: the injected random stream is consumed in a fixed order.
@@ -330,14 +333,16 @@ interface LiveRunInput {
 	live: LiveOptions;
 	warnings: string[];
 	entries: ReplayEntry[];
+	/** The wall clock of the progress line; injected so a test needs no real one (C-7). */
+	nowMs?: (() => number) | undefined;
 }
 
 /** One prompt of the walk, keyed the way the checkpoint and the retain documents key it. */
 const promptKey = (prompt: ReplayPrompt) => `${prompt.file ?? "transcript"}:${prompt.index}`;
 
 /** `mm:ss` since the walk started, for the progress line (D40). */
-function elapsedSince(startedAt: number): string {
-	const seconds = Math.floor((Date.now() - startedAt) / 1000);
+function elapsedSince(startedAt: number, nowMs: () => number): string {
+	const seconds = Math.floor((nowMs() - startedAt) / 1000);
 	return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
@@ -365,6 +370,7 @@ async function runLiveReplay({
 	live,
 	warnings,
 	entries,
+	nowMs = () => Date.now(),
 }: LiveRunInput): Promise<ReplayResult> {
 	if (live.uses === "judged" && !live.judge) throw new Error('live uses "judged" needs a judge');
 	const utcDay = (at: Date) => at.toISOString().slice(0, 10);
@@ -399,7 +405,7 @@ async function runLiveReplay({
 	const checkpointAt = checkpoint ? new Date(checkpoint.lastAt) : undefined;
 	// Progress and failure accounting (this invocation only, D40): the line shows the run moving.
 	const limit = live.maxConsecutiveFailures ?? 5;
-	const startedAt = Date.now();
+	const startedAt = nowMs();
 	const remaining = prompts.filter((prompt) => !checkpointedKeys.has(promptKey(prompt))).length;
 	let done = 0;
 	let seededThisRun = 0;
@@ -414,7 +420,7 @@ async function runLiveReplay({
 	});
 	const emitProgress = () =>
 		live.onProgress?.(
-			`progress ${done}/${remaining} prompts, ${seededThisRun} seeded, ${measuredThisRun} measured, ${failedThisRun} failed, ${elapsedSince(startedAt)} elapsed`,
+			`progress ${done}/${remaining} prompts, ${seededThisRun} seeded, ${measuredThisRun} measured, ${failedThisRun} failed, ${elapsedSince(startedAt, nowMs)} elapsed`,
 		);
 	const saveCheckpoint = (lastWalked: Date) =>
 		live.onCheckpoint?.({
