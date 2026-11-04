@@ -18,7 +18,7 @@ dmn replay ~/.claude/projects/<project>/<session>.jsonl [more.jsonl ...] [--top 
 | `--manifests <dir>`              | Directory whose `package.json`, `tsconfig.json`, `Cargo.toml`, `pyproject.toml` give the cue's stack.                                                                                    |
 | `--out <dir>`                    | Where run directories go. Default: the `replayDir` config key.                                                                                                                           |
 | `--top <n>`                      | List length and the `n` of precision@n. Default 5.                                                                                                                                       |
-| `--judge fake\|laya`             | Adds a third order, `activation+judge` (below). Only this flag does: a configured provider alone makes no replay call the network. `--threshold <p>` overrides `judge.threshold`.        |
+| `--judge fake\|laya\|typesafe`   | Adds a third order, `activation+judge` (below). Only this flag does: a configured provider alone makes no replay call the network. `--threshold <p>` overrides `judge.threshold`.        |
 | `--as-live`                      | Replay time instead of reading a seeded store (below). Every prompt line must carry a timestamp; a prompt without one exits 2 naming the file and index.                                 |
 | `--measure-from <iso>`           | With `--as-live`: prompts before this time are retained only — seeding, never measured.                                                                                                  |
 | `--uses judged\|none`            | With `--as-live`: the use signal (below). `judged` (the default) needs `--judge`; `none` records nothing, for an ablation.                                                               |
@@ -51,7 +51,7 @@ report next to it and set `useful` to `true` when the memory would have helped w
 
 ## Judge with Laya
 
-`dmn replay judge <run-dir> [--threshold <p>] [--judge fake|laya]` fills `judgements.json` without
+`dmn replay judge <run-dir> [--threshold <p>] [--judge fake|laya|typesafe]` fills `judgements.json` without
 a human. For every shown memory it asks a judge whether the memory would have helped with its
 prompt, stores the calibrated probability as `judge: {useful, level}` (P(true) in 0..1 and an
 expected level 0..3: useless, background, helpful, decisive), and sets `useful` to
@@ -86,14 +86,37 @@ dmn replay judge <run-dir> --judge fake  # keyword overlap, offline, for dry run
 - **Local model later.** The model behind the service is open weights (ModernBERT-large,
   Apache-2.0); `judge.baseUrl` lets a local server answer the same API.
 
+### Judge with TypeSafe (Jev)
+
+The same command with `--judge typesafe` (or `"judge": {"provider": "typesafe"}` in
+config.json) asks TypeSafe's Jev model instead:
+
+```bash
+export TYPESAFE_API_KEY=...                    # environment only; never written to config or the run
+dmn replay judge <run-dir> --judge typesafe
+```
+
+- **What is sent.** To `https://api.typesafe.ai/v1/systemone` (`judge.baseUrl` overrides): one
+  request per memory, with `model: "jev-latest"`, the same state text as Laya (the prompt and
+  the memory text cut to 1,500 characters) and the same two questions; a kind question sends the
+  bare text. No ids, tags, working directories or organization names. The service's
+  documentation states what it retains; check it before pointing this at private prompts.
+- **No batch form.** The endpoint answers one state per request, so dmn sends one request per
+  memory with at most 8 in flight. A request that fails — after the same five-attempt retry of
+  429 and 503 honouring `Retry-After` — leaves that memory unanswered and judges the rest; a run
+  where every request fails fails like Laya's would.
+- **Cost.** Each request is billed on its `usage.input_tokens` (about one prompt-plus-memory
+  per memory), and Jev reads 32k tokens per question — the reason to prefer it on long prompts,
+  where a judge that truncates the state never sees the memory it is judging.
+
 ## The judge gate: a third order
 
-`dmn replay … --judge fake|laya` runs the activation list through the same gate the hooks use
+`dmn replay … --judge fake|laya|typesafe` runs the activation list through the same gate the hooks use
 (one judge call per prompt, candidates below `judge.threshold` dropped, unanswered ones kept),
 then takes the top `n`. `report.md` gains an `activation+judge:` list per prompt, and
 `judgements.json` gains entries with `order: "activation+judge"` whose `judge: {useful, level}`
 is already filled, so `replay judge` has nothing left to ask for them. The `store` and `activation`
-lists are unchanged by the flag. Use `fake` offline, `laya` for the real gate.
+lists are unchanged by the flag. Use `fake` offline, `laya` or `typesafe` for the real gate.
 
 Read the third row with care: its entries are labelled by the judge that filtered them, so under
 the same judge and threshold `activation+judge` is an upper bound by construction (close to 1;
