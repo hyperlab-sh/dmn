@@ -83,6 +83,61 @@ describe("organization and project", () => {
 			"hyperlab",
 			"mx",
 		],
+		// D44: a mapped organization directory anchors the project at the segment after it.
+		[
+			"path: segment after a mapped directory, deep",
+			{ cwd: "/work/lab/tempad/notes/briefs", organizations: { lab: "hyperlab" } },
+			"hyperlab",
+			"tempad",
+		],
+		[
+			"path: segment after a mapped directory, shallow",
+			{ cwd: "/work/lab/tempad/bin", organizations: { lab: "hyperlab" } },
+			"hyperlab",
+			"tempad",
+		],
+		[
+			"path: mapped directory anchors despite deeper segments",
+			{
+				cwd: "/work/lab/mx/scratch/reports/squad-parity/briefs",
+				organizations: { lab: "hyperlab" },
+			},
+			"hyperlab",
+			"mx",
+		],
+		[
+			"path: worktrees wins over the mapped directory",
+			{ cwd: "/work/lab/mx/worktrees/atoms-p1/packages", organizations: { lab: "hyperlab" } },
+			"hyperlab",
+			"mx",
+		],
+		[
+			"path: mapped directory with nothing after it",
+			{ cwd: "/work/lab", organizations: { lab: "hyperlab" } },
+			"generic",
+			"lab",
+		],
+		[
+			"path: unmapped directory above the last segment",
+			{ cwd: "/work/marko-ui", organizations: { lab: "hyperlab" } },
+			"generic",
+			"marko-ui",
+		],
+		[
+			"path: the first of two mapped directories anchors",
+			{
+				cwd: "/w/acme/first/other/last",
+				organizations: { acme: "acme-corp", other: "other-org" },
+			},
+			"acme-corp",
+			"first",
+		],
+		[
+			"path: anchor named like an Object member",
+			{ cwd: "/w/constructor/widgets/src" },
+			"generic",
+			"src",
+		],
 		["path: parent named in the mapping", { cwd: "/w/acme/widgets" }, "acme-corp", "widgets"],
 		["path: empty cwd", { cwd: "" }, "generic", "none"],
 		["path: root cwd", { cwd: "/" }, "generic", "none"],
