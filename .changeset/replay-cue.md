@@ -1,0 +1,5 @@
+---
+"@hyperlab.sh/dmn": patch
+---
+
+`dmn replay --as-live` and `dmn backfill` no longer file every memory of a walk under `project: none` in the generic bank. When a prompt's recorded working directory cannot be scanned (the directory does not exist on the machine running the walk, or holds no `HYPER.md` and no git origin), the cue now takes organization and project from the path itself: the project is the segment before a `worktrees` segment when the path contains one (`/work/lab/some-space/worktrees/main` → `some-space`), else the last segment; the organization is the `organizations` mapping applied to the segment before that project segment (`lab` → `hyperlab` when mapped), else `generic`. Replayed memories therefore carry the `project:` tag — and land in the bank — of the project the transcript was recorded in, and a live `dmn hook prompt` outside any repository gets the same answer (the scan still runs first; the path rule is only its fallback). `docs/replay.md` describes where a replayed prompt's organization and project come from.

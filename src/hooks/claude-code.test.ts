@@ -322,8 +322,9 @@ test("stop records the cited use under the cue's project", async () => {
 	const id = all.find((memory) => memory.text === "zeta fact")?.id as string;
 	const transcript_path = cite("project.jsonl", `[m:${id}] says so.`);
 	await handleHookEvent(event({ hook_event_name: "Stop", transcript_path }), deps);
-	// Outside any space or repository the cue's project is `none`; that is what gets recorded.
-	expect(state.projectsUsing(id)).toEqual(["none"]);
+	// Outside any space or repository the cue's project is the cwd's last segment (`work`,
+	// D42); that is what gets recorded.
+	expect(state.projectsUsing(id)).toEqual(["work"]);
 });
 
 test("a judge gates the prompt injection and the intrusive thought by their own thresholds", async () => {

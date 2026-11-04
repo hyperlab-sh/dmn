@@ -52,11 +52,46 @@ describe("organization and project", () => {
 			"generic",
 			"widgets",
 		],
-		["neither", {}, "generic", "none"],
+		// D42: no space root and no origin — the path itself says where we are.
+		[
+			"path: segment before worktrees, mapped parent",
+			{ cwd: "/work/lab/tempad/worktrees/main/packages/core", organizations: { lab: "hyperlab" } },
+			"hyperlab",
+			"tempad",
+		],
+		[
+			"path: segment before worktrees, empty mapping",
+			{ cwd: "/work/lab/tempad/worktrees/main", organizations: {} },
+			"generic",
+			"tempad",
+		],
+		[
+			"path: last segment, mapped parent",
+			{ cwd: "/work/lab/mx", organizations: { lab: "hyperlab" } },
+			"hyperlab",
+			"mx",
+		],
+		[
+			"path: last segment, mapping misses the parent",
+			{ cwd: "/home/u/src/core", organizations: { lab: "hyperlab" } },
+			"generic",
+			"core",
+		],
+		[
+			"path: windows separators",
+			{ cwd: "C:\\work\\lab\\mx\\worktrees\\main", organizations: { lab: "hyperlab" } },
+			"hyperlab",
+			"mx",
+		],
+		["path: parent named in the mapping", { cwd: "/w/acme/widgets" }, "acme-corp", "widgets"],
+		["path: empty cwd", { cwd: "" }, "generic", "none"],
+		["path: root cwd", { cwd: "/" }, "generic", "none"],
 	];
 	test.each(rows)("%s", (_name, overrides, organization, project) => {
-		const result = cue(overrides);
-		expect([result.organization, result.project]).toEqual([organization, project]);
+		const first = cue(overrides);
+		// C-7: the same input twice gives the same cue.
+		expect(first).toEqual(cue(structuredClone(overrides)));
+		expect([first.organization, first.project]).toEqual([organization, project]);
 	});
 });
 

@@ -214,6 +214,17 @@ test("--uses none writes no use rows and no co-use edges", async () => {
 	expect(live?.uses).toBe("none");
 });
 
+test("retained memories carry the recorded cwd's project, not none", async () => {
+	const { bank } = noneWalk;
+	expect(bank.length).toBeGreaterThan(0);
+	// The fixtures record cwd /home/dev/acme/widgets: with no scan, the last path segment is
+	// the project (D42), so every retained turn is tagged for that project.
+	for (const record of bank) {
+		expect(record.tags).toContain("project:widgets");
+		expect(record.tags).not.toContain("project:none");
+	}
+});
+
 test("prompts before --measure-from seed the store and are never measured", async () => {
 	const { entries, live, bank, uses } = await walk({
 		uses: "judged",
